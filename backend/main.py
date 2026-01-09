@@ -63,7 +63,6 @@ async def screenshot(url: str):
                 "--no-sandbox",                # Essential for Docker
                 "--disable-dev-shm-usage",     # SAVES MEMORY (Critical for Free Tier)
                 "--disable-gpu",               # Saves CPU
-                "--single-process",            # Forces less RAM usage (Firefox specific)
             ]
         )
         
