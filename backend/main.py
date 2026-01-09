@@ -56,8 +56,16 @@ async def screenshot(url: str):
         url = f"https://{url}"
 
     async with async_playwright() as p:
-        print("2. Launching Browser...")
-        browser = await p.firefox.launch(headless=True)
+        print("2. Launching Browser (Optimized)...")
+        browser = await p.firefox.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",                # Essential for Docker
+                "--disable-dev-shm-usage",     # SAVES MEMORY (Critical for Free Tier)
+                "--disable-gpu",               # Saves CPU
+                "--single-process",            # Forces less RAM usage (Firefox specific)
+            ]
+        )
         
         # Standard desktop viewport
         context = await browser.new_context(
