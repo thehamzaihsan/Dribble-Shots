@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Camera, Download, Monitor, Smartphone, Palette, Info, Sparkles, Link2, Eye, Layers } from 'lucide-react';
+import { Camera, Download, Monitor, Smartphone, Palette, Info, Sparkles, Link2, Eye, Layers, Plus, Trash2, Type, Image as ImageIcon, Upload, Save, RefreshCw } from 'lucide-react';
 import './App.css';
 
 function App() {
@@ -10,7 +10,23 @@ function App() {
   const [error, setError] = useState(null);
   const [bgColor, setBgColor] = useState('#ffffff');
   const [displayMode, setDisplayMode] = useState('both');
+  const [overlap, setOverlap] = useState(false);
+  const [enableShadow, setEnableShadow] = useState(false);
+  const [showMockups, setShowMockups] = useState(true);
+  const [desktopBorderRadius, setDesktopBorderRadius] = useState(8);
+  const [mobileBorderRadius, setMobileBorderRadius] = useState(8);
+  const [config, setConfig] = useState(null);
+  const [canvasSize, setCanvasSize] = useState('16:9'); // Default 1920x1080
+  
+  // Template system
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [elements, setElements] = useState([]); // Elements in current template
+  const [selectedElement, setSelectedElement] = useState(null);
+  const [mockupFrame, setMockupFrame] = useState(null); // Mockup frame overlay
+  
   const canvasRef = useRef(null);
+  const previewRef = useRef(null);
 
   const presetColors = [
     { color: '#ffffff', name: 'White' },
@@ -23,23 +39,54 @@ function App() {
     { color: '#8b5cf6', name: 'Violet' },
   ];
 
+  // Function to load config
+  const loadConfig = async () => {
+    try {
+      // Add timestamp to prevent caching
+      const res = await fetch(`/config.json?t=${Date.now()}`);
+      const data = await res.json();
+      setConfig(data);
+      console.log('Config reloaded:', data);
+      return data;
+    } catch (err) {
+      console.error('Failed to load config:', err);
+      return null;
+    }
+  };
+
+  // Load config on mount
   useEffect(() => {
-    if (desktopSrc && mobileSrc && canvasRef.current) {
+    fetch('/config.json')
+      .then(res => res.json())
+      .then(data => setConfig(data))
+      .catch(err => console.error('Failed to load config:', err));
+  }, []);
+
+  useEffect(() => {
+    if (desktopSrc && mobileSrc && canvasRef.current && config) {
       drawCanvas();
     }
-  }, [desktopSrc, mobileSrc, bgColor, displayMode]);
+  }, [desktopSrc, mobileSrc, bgColor, displayMode, overlap, elements, mockupFrame, enableShadow, showMockups, desktopBorderRadius, mobileBorderRadius, config, canvasSize]);
 
   const drawCanvas = () => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !config) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    canvas.width = 1920;
-    canvas.height = 1080;
+    // Get canvas dimensions based on selected size
+    const canvasSizes = {
+      '16:9': { width: 1920, height: 1080 },
+      '3:2': { width: 1800, height: 1200 },
+      '1:1': { width: 1080, height: 1080 },
+    };
+
+    const selectedSize = canvasSizes[canvasSize];
+    canvas.width = selectedSize.width;
+    canvas.height = selectedSize.height;
 
     ctx.fillStyle = bgColor;
-    ctx.fillRect(0, 0, 1920, 1080);
+    ctx.fillRect(0, 0, selectedSize.width, selectedSize.height);
 
     const desktopImg = new Image();
     const mobileImg = new Image();
@@ -52,67 +99,565 @@ function App() {
         drawDesktopOnly(ctx, desktopImg);
       } else if (displayMode === 'mobile' && mobileLoaded) {
         drawMobileOnly(ctx, mobileImg);
+        drawElements(ctx);
       } else if (displayMode === 'both' && desktopLoaded && mobileLoaded) {
         drawBoth(ctx, desktopImg, mobileImg);
       }
     };
 
     const drawDesktopOnly = (ctx, img) => {
-      const topGap = 1080 * 0.15;
-      const leftPadding = 120;
-      const rightPadding = 120;
-      const availableWidth = 1920 - leftPadding - rightPadding;
-      const availableHeight = 1080 - topGap;
+      const mockupCfg = config.desktopOnly.mockup;
+      const screenshotCfg = config.desktopOnly.screenshot;
 
-      const sourceHeight = Math.min(img.height, img.width * (availableHeight / availableWidth));
-      ctx.drawImage(img, 0, 0, img.width, sourceHeight, leftPadding, topGap, availableWidth, availableHeight);
+      const drawContent = () => {
+        // Add shadow if enabled
+        if (enableShadow) {
+          ctx.shadowColor = config.shadow.desktop.color;
+          ctx.shadowBlur = config.shadow.desktop.blur;
+          ctx.shadowOffsetX = config.shadow.desktop.offsetX;
+          ctx.shadowOffsetY = config.shadow.desktop.offsetY;
+        }
+        
+        if (showMockups) {
+          const mockup = new Image();
+          mockup.onload = () => {
+            // Draw mockup WITHOUT clipping (to show device frame)
+            ctx.drawImage(mockup, mockupCfg.x, mockupCfg.y, mockupCfg.width, mockupCfg.height);
+            
+            // Reset shadow
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            
+            // Create rounded rectangle clip path for screenshot only
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(screenshotCfg.x, screenshotCfg.y, screenshotCfg.width, screenshotCfg.height, [desktopBorderRadius, desktopBorderRadius, 0, 0]);
+            ctx.clip();
+            
+            // Draw screenshot with clipping
+            const sourceHeight = Math.min(img.height, img.width * (screenshotCfg.height / screenshotCfg.width));
+            ctx.drawImage(img, screenshotCfg.sourceX, screenshotCfg.sourceY, img.width, sourceHeight, 
+              screenshotCfg.x, screenshotCfg.y, screenshotCfg.width, screenshotCfg.height);
+            
+            ctx.restore(); // Remove clip
+            
+            drawElements(ctx);
+          };
+          mockup.onerror = () => {
+            console.error('Failed to load Desktop.png mockup');
+            // Draw screenshot without mockup
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(screenshotCfg.x, screenshotCfg.y, screenshotCfg.width, screenshotCfg.height, [desktopBorderRadius, desktopBorderRadius, 0, 0]);
+            ctx.clip();
+            
+            const sourceHeight = Math.min(img.height, img.width * (screenshotCfg.height / screenshotCfg.width));
+            ctx.drawImage(img, screenshotCfg.sourceX, screenshotCfg.sourceY, img.width, sourceHeight, 
+              screenshotCfg.x, screenshotCfg.y, screenshotCfg.width, screenshotCfg.height);
+            
+            ctx.restore();
+            drawElements(ctx);
+          };
+          mockup.src = config.mockups.desktop;
+        } else {
+          // No mockup - just draw screenshot with border radius
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+          
+          ctx.save();
+          ctx.beginPath();
+          ctx.roundRect(screenshotCfg.x, screenshotCfg.y, screenshotCfg.width, screenshotCfg.height, [desktopBorderRadius, desktopBorderRadius, 0, 0]);
+          ctx.clip();
+          
+          const sourceHeight = Math.min(img.height, img.width * (screenshotCfg.height / screenshotCfg.width));
+          ctx.drawImage(img, screenshotCfg.sourceX, screenshotCfg.sourceY, img.width, sourceHeight, 
+            screenshotCfg.x, screenshotCfg.y, screenshotCfg.width, screenshotCfg.height);
+          
+          ctx.restore();
+          drawElements(ctx);
+        }
+      };
+
+      drawContent();
     };
 
     const drawMobileOnly = (ctx, img) => {
-      const topGap = 1080 * 0.1;
-      const displayWidth = 500;
-      const displayHeight = 1080 - topGap;
-      const x = (1920 - displayWidth) / 2;
+      const mockupCfg = config.mobileOnly.mockup;
+      const screenshotCfg = config.mobileOnly.screenshot;
 
-      const sourceHeight = Math.min(img.height, img.width * (displayHeight / displayWidth));
-      ctx.drawImage(img, 0, 0, img.width, sourceHeight, x, topGap, displayWidth, displayHeight);
+      // Add shadow if enabled
+      if (enableShadow) {
+        ctx.shadowColor = config.shadow.mobile.color;
+        ctx.shadowBlur = config.shadow.mobile.blur;
+        ctx.shadowOffsetX = config.shadow.mobile.offsetX;
+        ctx.shadowOffsetY = config.shadow.mobile.offsetY;
+      }
+
+      if (showMockups) {
+        const mockup = new Image();
+        mockup.onload = () => {
+          // Draw mockup WITHOUT clipping (to show device frame)
+          ctx.drawImage(mockup, mockupCfg.x, mockupCfg.y, mockupCfg.width, mockupCfg.height);
+          
+          // Reset shadow before drawing screenshot
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+          
+          // Create rounded rectangle clip path for screenshot only
+          ctx.save();
+          ctx.beginPath();
+          ctx.roundRect(screenshotCfg.x, screenshotCfg.y, screenshotCfg.width, screenshotCfg.height, [mobileBorderRadius, mobileBorderRadius, 0, 0]);
+          ctx.clip();
+          
+          const sourceHeight = Math.min(img.height, img.width * (screenshotCfg.height / screenshotCfg.width));
+          ctx.drawImage(img, screenshotCfg.sourceX, screenshotCfg.sourceY, img.width, sourceHeight, 
+            screenshotCfg.x, screenshotCfg.y, screenshotCfg.width, screenshotCfg.height);
+          
+          ctx.restore();
+        };
+        mockup.onerror = (e) => {
+          console.error('Failed to load mobile mockup in mobileOnly mode:', e);
+          // Reset shadow
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+          
+          ctx.save();
+          ctx.beginPath();
+          ctx.roundRect(screenshotCfg.x, screenshotCfg.y, screenshotCfg.width, screenshotCfg.height, [mobileBorderRadius, mobileBorderRadius, 0, 0]);
+          ctx.clip();
+          
+          const sourceHeight = Math.min(img.height, img.width * (screenshotCfg.height / screenshotCfg.width));
+          ctx.drawImage(img, screenshotCfg.sourceX, screenshotCfg.sourceY, img.width, sourceHeight, 
+            screenshotCfg.x, screenshotCfg.y, screenshotCfg.width, screenshotCfg.height);
+          
+          ctx.restore();
+        };
+        mockup.src = config.mockups.mobile;
+      } else {
+        // No mockup - just draw screenshot with border radius
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+        
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(screenshotCfg.x, screenshotCfg.y, screenshotCfg.width, screenshotCfg.height, [mobileBorderRadius, mobileBorderRadius, 0, 0]);
+        ctx.clip();
+        
+        const sourceHeight = Math.min(img.height, img.width * (screenshotCfg.height / screenshotCfg.width));
+        ctx.drawImage(img, screenshotCfg.sourceX, screenshotCfg.sourceY, img.width, sourceHeight, 
+          screenshotCfg.x, screenshotCfg.y, screenshotCfg.width, screenshotCfg.height);
+        
+        ctx.restore();
+      }
     };
 
     const drawBoth = (ctx, desktopImg, mobileImg) => {
-      const leftPadding = 60;
-      const rightPadding = 60;
-      const gap = 40;
+      // Helper function to draw mobile with Android mockup
+      const drawMobileWithMockup = (mockupCfg, screenshotCfg, mobileSourceHeight, shadowCfg) => {
+        const mockupX = mockupCfg.x;
+        const mockupY = mockupCfg.y;
+        const mockupWidth = mockupCfg.width;
+        const mockupHeight = mockupCfg.height;
+        
+        const screenshotX = screenshotCfg.x;
+        const screenshotY = screenshotCfg.y;
+        const screenshotWidth = screenshotCfg.width;
+        const screenshotHeight = screenshotCfg.height;
 
-      const desktopTopGap = 1080 * 0.2;
-      const desktopAvailableWidth = (1920 - leftPadding - rightPadding - gap) * 0.75;
-      const desktopAvailableHeight = 1080 - desktopTopGap;
+        // Add shadow BEFORE drawing if enabled
+        if (shadowCfg) {
+          ctx.shadowColor = shadowCfg.color;
+          ctx.shadowBlur = shadowCfg.blur;
+          ctx.shadowOffsetX = shadowCfg.offsetX;
+          ctx.shadowOffsetY = shadowCfg.offsetY;
+        }
 
-      const desktopSourceHeight = Math.min(
-        desktopImg.height,
-        desktopImg.width * (desktopAvailableHeight / desktopAvailableWidth)
-      );
+        if (showMockups) {
+          const androidMockup = new Image();
+          androidMockup.onload = () => {
+            // Reset shadow before screenshot
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
 
-      ctx.drawImage(
-        desktopImg,
-        0, 0, desktopImg.width, desktopSourceHeight,
-        leftPadding, desktopTopGap, desktopAvailableWidth, desktopAvailableHeight
-      );
+            // FIRST: Draw screenshot WITH border radius clipping
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(screenshotX, screenshotY, screenshotWidth, screenshotHeight, [mobileBorderRadius, mobileBorderRadius, 0, 0]);
+            ctx.clip();
+            
+            ctx.drawImage(
+              mobileImg,
+              screenshotCfg.sourceX, screenshotCfg.sourceY, mobileImg.width, mobileSourceHeight,
+              screenshotX, screenshotY, screenshotWidth, screenshotHeight
+            );
+            
+            ctx.restore();
+            
+            // SECOND: Draw mockup frame ON TOP (no clipping - full frame visible)
+            ctx.drawImage(androidMockup, mockupX, mockupY, mockupWidth, mockupHeight);
 
-      const mobileTopGap = 1080 * 0.3;
-      const mobileAvailableWidth = (1920 - leftPadding - rightPadding - gap) * 0.25;
-      const mobileAvailableHeight = 1080 - mobileTopGap;
-      const mobileX = leftPadding + desktopAvailableWidth + gap;
+            drawElements(ctx);
+          };
+          androidMockup.onerror = (e) => {
+            console.error('Failed to load mobile mockup:', e);
+            // Draw mobile without mockup if it fails
+            
+            // Reset shadow
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
 
-      const mobileSourceHeight = Math.min(
-        mobileImg.height,
-        mobileImg.width * (mobileAvailableHeight / mobileAvailableWidth)
-      );
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(screenshotX, screenshotY, screenshotWidth, screenshotHeight, [mobileBorderRadius, mobileBorderRadius, 0, 0]);
+            ctx.clip();
 
-      ctx.drawImage(
-        mobileImg,
-        0, 0, mobileImg.width, mobileSourceHeight,
-        mobileX, mobileTopGap, mobileAvailableWidth, mobileAvailableHeight
-      );
+            ctx.drawImage(
+              mobileImg,
+              screenshotCfg.sourceX, screenshotCfg.sourceY, mobileImg.width, mobileSourceHeight,
+              screenshotX, screenshotY, screenshotWidth, screenshotHeight
+            );
+
+            ctx.restore();
+            drawElements(ctx);
+          };
+          androidMockup.src = config.mockups.mobile;
+        } else {
+          // No mockup - just draw mobile with border radius
+          
+          // Reset shadow
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 0;
+
+          ctx.save();
+          ctx.beginPath();
+          ctx.roundRect(screenshotX, screenshotY, screenshotWidth, screenshotHeight, [mobileBorderRadius, mobileBorderRadius, 0, 0]);
+          ctx.clip();
+
+          ctx.drawImage(
+            mobileImg,
+            screenshotCfg.sourceX, screenshotCfg.sourceY, mobileImg.width, mobileSourceHeight,
+            screenshotX, screenshotY, screenshotWidth, screenshotHeight
+          );
+
+          ctx.restore();
+          drawElements(ctx);
+        }
+      };
+
+      // Draw desktop with Desktop.png mockup
+      const drawDesktopContent = () => {
+        if (overlap) {
+          // Overlap mode
+          const desktopMockupCfg = config.bothMode.overlap.desktop.mockup;
+          const desktopScreenshotCfg = config.bothMode.overlap.desktop.screenshot;
+          const mobileMockupCfg = config.bothMode.overlap.mobile.mockup;
+          const mobileScreenshotCfg = config.bothMode.overlap.mobile.screenshot;
+
+          // Use explicit x from config
+          const desktopMockupX = desktopMockupCfg.x;
+          const desktopScreenshotX = desktopScreenshotCfg.x;
+          const mobileMockupX = mobileMockupCfg.x;
+          const mobileScreenshotX = mobileScreenshotCfg.x;
+          
+          const desktopSourceHeight = Math.min(
+            desktopImg.height,
+            desktopImg.width * (desktopScreenshotCfg.height / desktopScreenshotCfg.width)
+          );
+
+          // Add shadow if enabled
+          if (enableShadow) {
+            ctx.shadowColor = config.shadow.desktop.color;
+            ctx.shadowBlur = config.shadow.desktop.blur;
+            ctx.shadowOffsetX = config.shadow.desktop.offsetX;
+            ctx.shadowOffsetY = config.shadow.desktop.offsetY;
+          }
+
+          if (showMockups) {
+            const desktopMockup = new Image();
+            desktopMockup.onload = () => {
+              // Draw mockup WITHOUT clipping (to show device frame)
+              ctx.drawImage(desktopMockup, desktopMockupX, desktopMockupCfg.y, desktopMockupCfg.width, desktopMockupCfg.height);
+
+              // Reset shadow for screenshot
+              ctx.shadowColor = 'transparent';
+              ctx.shadowBlur = 0;
+              ctx.shadowOffsetX = 0;
+              ctx.shadowOffsetY = 0;
+
+              // Create rounded rectangle clip path for desktop screenshot
+              ctx.save();
+              ctx.beginPath();
+              ctx.roundRect(desktopScreenshotX, desktopScreenshotCfg.y, desktopScreenshotCfg.width, desktopScreenshotCfg.height, [desktopBorderRadius, desktopBorderRadius, 0, 0]);
+              ctx.clip();
+
+              // Then draw desktop screenshot
+              ctx.drawImage(
+                desktopImg,
+                desktopScreenshotCfg.sourceX, desktopScreenshotCfg.sourceY, desktopImg.width, desktopSourceHeight,
+                desktopScreenshotX, desktopScreenshotCfg.y, desktopScreenshotCfg.width, desktopScreenshotCfg.height
+              );
+
+              ctx.restore(); // Remove desktop clip
+
+              // Now draw mobile - use explicit x from config
+              const mobileSourceHeight = Math.min(
+                mobileImg.height,
+                mobileImg.width * (mobileScreenshotCfg.height / mobileScreenshotCfg.width)
+              );
+
+              // Mobile in overlap mode always has shadow (enhanced based on enableShadow)
+              const mobileShadow = {
+                color: config.shadow.mobileOverlap.color,
+                blur: enableShadow ? config.shadow.mobile.blur : config.shadow.mobileOverlap.blur,
+                offsetX: config.shadow.mobileOverlap.offsetX,
+                offsetY: enableShadow ? config.shadow.mobile.offsetY : config.shadow.mobileOverlap.offsetY
+              };
+
+              // Use explicit x values from config
+              const mobileMockupCfgWithX = {
+                ...mobileMockupCfg,
+                x: mobileMockupX // Use mockup's own x from config
+              };
+              
+              const mobileScreenshotCfgWithX = {
+                ...mobileScreenshotCfg,
+                x: mobileScreenshotX
+              };
+
+              drawMobileWithMockup(mobileMockupCfgWithX, mobileScreenshotCfgWithX, mobileSourceHeight, mobileShadow);
+            };
+            desktopMockup.onerror = () => {
+              console.error('Failed to load desktop mockup in overlap mode');
+              // Draw desktop without mockup
+              ctx.shadowColor = 'transparent';
+              ctx.shadowBlur = 0;
+              ctx.shadowOffsetX = 0;
+              ctx.shadowOffsetY = 0;
+
+              ctx.save();
+              ctx.beginPath();
+              ctx.roundRect(desktopScreenshotX, desktopScreenshotCfg.y, desktopScreenshotCfg.width, desktopScreenshotCfg.height, [desktopBorderRadius, desktopBorderRadius, 0, 0]);
+              ctx.clip();
+
+              ctx.drawImage(
+                desktopImg,
+                desktopScreenshotCfg.sourceX, desktopScreenshotCfg.sourceY, desktopImg.width, desktopSourceHeight,
+                desktopScreenshotX, desktopScreenshotCfg.y, desktopScreenshotCfg.width, desktopScreenshotCfg.height
+              );
+
+              ctx.restore();
+
+              const mobileSourceHeight = Math.min(
+                mobileImg.height,
+                mobileImg.width * (mobileScreenshotCfg.height / mobileScreenshotCfg.width)
+              );
+
+              const mobileShadow = {
+                color: config.shadow.mobileOverlap.color,
+                blur: enableShadow ? config.shadow.mobile.blur : config.shadow.mobileOverlap.blur,
+                offsetX: config.shadow.mobileOverlap.offsetX,
+                offsetY: enableShadow ? config.shadow.mobile.offsetY : config.shadow.mobileOverlap.offsetY
+              };
+
+              const mobileMockupCfgWithX = {
+                ...mobileMockupCfg,
+                x: mobileMockupX
+              };
+              
+              const mobileScreenshotCfgWithX = {
+                ...mobileScreenshotCfg,
+                x: mobileScreenshotX
+              };
+
+              drawMobileWithMockup(mobileMockupCfgWithX, mobileScreenshotCfgWithX, mobileSourceHeight, mobileShadow);
+            };
+            desktopMockup.src = config.mockups.desktop;
+          } else {
+            // No desktop mockup
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(desktopScreenshotX, desktopScreenshotCfg.y, desktopScreenshotCfg.width, desktopScreenshotCfg.height, [desktopBorderRadius, desktopBorderRadius, 0, 0]);
+            ctx.clip();
+
+            ctx.drawImage(
+              desktopImg,
+              desktopScreenshotCfg.sourceX, desktopScreenshotCfg.sourceY, desktopImg.width, desktopSourceHeight,
+              desktopScreenshotX, desktopScreenshotCfg.y, desktopScreenshotCfg.width, desktopScreenshotCfg.height
+            );
+
+            ctx.restore();
+
+            const mobileSourceHeight = Math.min(
+              mobileImg.height,
+              mobileImg.width * (mobileScreenshotCfg.height / mobileScreenshotCfg.width)
+            );
+
+            const mobileShadow = {
+              color: config.shadow.mobileOverlap.color,
+              blur: enableShadow ? config.shadow.mobile.blur : config.shadow.mobileOverlap.blur,
+              offsetX: config.shadow.mobileOverlap.offsetX,
+              offsetY: enableShadow ? config.shadow.mobile.offsetY : config.shadow.mobileOverlap.offsetY
+            };
+
+            const mobileMockupCfgWithX = {
+              ...mobileMockupCfg,
+              x: mobileMockupX
+            };
+            
+            const mobileScreenshotCfgWithX = {
+              ...mobileScreenshotCfg,
+              x: mobileScreenshotX
+            };
+
+            drawMobileWithMockup(mobileMockupCfgWithX, mobileScreenshotCfgWithX, mobileSourceHeight, mobileShadow);
+          }
+        } else {
+          // Non-overlap (normal) mode
+          const desktopMockupCfg = config.bothMode.normal.desktop.mockup;
+          const desktopScreenshotCfg = config.bothMode.normal.desktop.screenshot;
+          const mobileMockupCfg = config.bothMode.normal.mobile.mockup;
+          const mobileScreenshotCfg = config.bothMode.normal.mobile.screenshot;
+
+          const desktopSourceHeight = Math.min(
+            desktopImg.height,
+            desktopImg.width * (desktopScreenshotCfg.height / desktopScreenshotCfg.width)
+          );
+
+          // Add shadow if enabled for desktop
+          if (enableShadow) {
+            ctx.shadowColor = config.shadow.desktop.color;
+            ctx.shadowBlur = config.shadow.desktop.blur;
+            ctx.shadowOffsetX = config.shadow.desktop.offsetX;
+            ctx.shadowOffsetY = config.shadow.desktop.offsetY;
+          }
+
+          if (showMockups) {
+            const desktopMockup = new Image();
+            desktopMockup.onload = () => {
+              // Draw mockup WITHOUT clipping (to show device frame)
+              ctx.drawImage(desktopMockup, desktopMockupCfg.x, desktopMockupCfg.y, desktopMockupCfg.width, desktopMockupCfg.height);
+
+              // Reset shadow for screenshot
+              ctx.shadowColor = 'transparent';
+              ctx.shadowBlur = 0;
+              ctx.shadowOffsetX = 0;
+              ctx.shadowOffsetY = 0;
+
+              // Create rounded rectangle clip path for desktop screenshot
+              ctx.save();
+              ctx.beginPath();
+              ctx.roundRect(desktopScreenshotCfg.x, desktopScreenshotCfg.y, desktopScreenshotCfg.width, desktopScreenshotCfg.height, [desktopBorderRadius, desktopBorderRadius, 0, 0]);
+              ctx.clip();
+
+              // Then draw desktop screenshot
+              ctx.drawImage(
+                desktopImg,
+                desktopScreenshotCfg.sourceX, desktopScreenshotCfg.sourceY, desktopImg.width, desktopSourceHeight,
+                desktopScreenshotCfg.x, desktopScreenshotCfg.y, desktopScreenshotCfg.width, desktopScreenshotCfg.height
+              );
+
+              ctx.restore(); // Remove desktop clip
+
+              // Now draw mobile
+              const mobileSourceHeight = Math.min(
+                mobileImg.height,
+                mobileImg.width * (mobileScreenshotCfg.height / mobileScreenshotCfg.width)
+              );
+
+              const mobileShadow = enableShadow ? config.shadow.mobile : null;
+
+              drawMobileWithMockup(mobileMockupCfg, mobileScreenshotCfg, mobileSourceHeight, mobileShadow);
+            };
+            desktopMockup.onerror = () => {
+              console.error('Failed to load desktop mockup in normal mode');
+              // Draw desktop without mockup
+              ctx.shadowColor = 'transparent';
+              ctx.shadowBlur = 0;
+              ctx.shadowOffsetX = 0;
+              ctx.shadowOffsetY = 0;
+
+              ctx.save();
+              ctx.beginPath();
+              ctx.roundRect(desktopScreenshotCfg.x, desktopScreenshotCfg.y, desktopScreenshotCfg.width, desktopScreenshotCfg.height, [desktopBorderRadius, desktopBorderRadius, 0, 0]);
+              ctx.clip();
+
+              ctx.drawImage(
+                desktopImg,
+                desktopScreenshotCfg.sourceX, desktopScreenshotCfg.sourceY, desktopImg.width, desktopSourceHeight,
+                desktopScreenshotCfg.x, desktopScreenshotCfg.y, desktopScreenshotCfg.width, desktopScreenshotCfg.height
+              );
+
+              ctx.restore();
+
+              const mobileSourceHeight = Math.min(
+                mobileImg.height,
+                mobileImg.width * (mobileScreenshotCfg.height / mobileScreenshotCfg.width)
+              );
+
+              const mobileShadow = enableShadow ? config.shadow.mobile : null;
+
+              drawMobileWithMockup(mobileMockupCfg, mobileScreenshotCfg, mobileSourceHeight, mobileShadow);
+            };
+            desktopMockup.src = config.mockups.desktop;
+          } else {
+            // No desktop mockup
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.roundRect(desktopScreenshotCfg.x, desktopScreenshotCfg.y, desktopScreenshotCfg.width, desktopScreenshotCfg.height, [desktopBorderRadius, desktopBorderRadius, 0, 0]);
+            ctx.clip();
+
+            ctx.drawImage(
+              desktopImg,
+              desktopScreenshotCfg.sourceX, desktopScreenshotCfg.sourceY, desktopImg.width, desktopSourceHeight,
+              desktopScreenshotCfg.x, desktopScreenshotCfg.y, desktopScreenshotCfg.width, desktopScreenshotCfg.height
+            );
+
+            ctx.restore();
+
+            const mobileSourceHeight = Math.min(
+              mobileImg.height,
+              mobileImg.width * (mobileScreenshotCfg.height / mobileScreenshotCfg.width)
+            );
+
+            const mobileShadow = enableShadow ? config.shadow.mobile : null;
+
+            drawMobileWithMockup(mobileMockupCfg, mobileScreenshotCfg, mobileSourceHeight, mobileShadow);
+          }
+        }
+      };
+
+      drawDesktopContent();
     };
 
     desktopImg.onload = () => {
@@ -127,6 +672,33 @@ function App() {
 
     if (desktopSrc) desktopImg.src = desktopSrc;
     if (mobileSrc) mobileImg.src = mobileSrc;
+  };
+
+  const drawElements = (ctx) => {
+    elements.forEach((element) => {
+      if (element.type === 'text') {
+        ctx.font = `${element.fontSize}px "${element.fontFamily}", sans-serif`;
+        ctx.fillStyle = element.color;
+        ctx.textAlign = element.textAlign;
+        ctx.textBaseline = 'top';
+        ctx.fillText(element.content, element.x, element.y);
+      } else if (element.type === 'image' && element.src) {
+        const img = new Image();
+        img.src = element.src;
+        img.onload = () => {
+          ctx.drawImage(img, element.x, element.y, element.width, element.height);
+        };
+      }
+    });
+    
+    // Draw mockup frame on top if available
+    if (mockupFrame) {
+      const frameImg = new Image();
+      frameImg.src = mockupFrame;
+      frameImg.onload = () => {
+        ctx.drawImage(frameImg, 0, 0, 1920, 1080);
+      };
+    }
   };
 
   const handleScreenshot = async (e) => {
@@ -168,31 +740,200 @@ function App() {
     }, 'image/png', 1.0);
   };
 
-  return (
-    <div className="w-full h-full flex flex-col bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950">
-      {/* Ambient glow effects */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-blue-500/10 rounded-full blur-[150px] animate-pulse" />
-        <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-purple-500/10 rounded-full blur-[150px] animate-pulse" style={{ animationDelay: '1s' }} />
-      </div>
+  const saveTemplate = () => {
+    const template = {
+      id: Date.now(),
+      name: `Template ${templates.length + 1}`,
+      elements: [...elements],
+      bgColor,
+      displayMode,
+      overlap,
+    };
+    setTemplates([...templates, template]);
+    alert('Template saved!');
+  };
 
+  const loadTemplate = (template) => {
+    setSelectedTemplate(template.id);
+    setElements(template.elements);
+    setBgColor(template.bgColor);
+    setDisplayMode(template.displayMode);
+    setOverlap(template.overlap);
+  };
+
+  const deleteTemplate = (id) => {
+    setTemplates(templates.filter(t => t.id !== id));
+    if (selectedTemplate === id) {
+      setSelectedTemplate(null);
+    }
+  };
+
+  const exportTemplate = (template) => {
+    const dataStr = JSON.stringify(template, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.download = `${template.name.replace(/\s+/g, '-')}-template.json`;
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAllTemplates = () => {
+    const dataStr = JSON.stringify(templates, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.download = `all-templates-${Date.now()}.json`;
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importTemplate = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json';
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const imported = JSON.parse(event.target.result);
+            
+            // Check if it's a single template or array of templates
+            if (Array.isArray(imported)) {
+              // Multiple templates
+              const newTemplates = imported.map(t => ({
+                ...t,
+                id: Date.now() + Math.random(), // Generate new IDs
+              }));
+              setTemplates([...templates, ...newTemplates]);
+              alert(`${newTemplates.length} template(s) imported successfully!`);
+            } else {
+              // Single template
+              const newTemplate = {
+                ...imported,
+                id: Date.now(),
+              };
+              setTemplates([...templates, newTemplate]);
+              alert('Template imported successfully!');
+            }
+          } catch (error) {
+            alert('Error importing template: Invalid file format');
+            console.error(error);
+          }
+        };
+        reader.readAsText(file);
+      }
+    };
+    input.click();
+  };
+
+  const addTextElement = () => {
+    const newElement = {
+      id: Date.now(),
+      type: 'text',
+      content: 'New Text',
+      x: 960,
+      y: 100,
+      fontSize: 48,
+      fontFamily: 'Arial',
+      color: '#000000',
+      textAlign: 'center',
+    };
+    setElements([...elements, newElement]);
+    setSelectedElement(newElement.id);
+  };
+
+  const addImageElement = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const newElement = {
+            id: Date.now(),
+            type: 'image',
+            src: event.target.result,
+            x: 860,
+            y: 100,
+            width: 200,
+            height: 200,
+          };
+          setElements([...elements, newElement]);
+          setSelectedElement(newElement.id);
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+    input.click();
+  };
+
+  const uploadMockupFrame = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/png';
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          setMockupFrame(event.target.result);
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+    input.click();
+  };
+
+  const removeMockupFrame = () => {
+    setMockupFrame(null);
+  };
+
+  const updateElement = (id, updates) => {
+    setElements(elements.map(el => el.id === id ? { ...el, ...updates } : el));
+  };
+
+  const deleteElement = (id) => {
+    setElements(elements.filter(el => el.id !== id));
+    if (selectedElement === id) {
+      setSelectedElement(null);
+    }
+  };
+
+  const handleDrag = (id, data) => {
+    // Scale from preview (1200px) to canvas (1920px)
+    const scale = 1920 / 1200;
+    updateElement(id, {
+      x: data.x * scale,
+      y: data.y * scale,
+    });
+  };
+
+  const selectedEl = elements.find(el => el.id === selectedElement);
+
+  return (
+    <div className="w-full h-full flex flex-col bg-gradient-to-br from-gray-50 via-white to-gray-100">
       {/* Header */}
-      <header className="relative z-10 border-b border-white/5 backdrop-blur-xl flex-shrink-0">
-        <div className="max-w-7xl mx-auto px-6 py-4">
+      <header className="relative z-10 border-b border-gray-200 backdrop-blur-xl bg-white/80 flex-shrink-0">
+        <div className="w-full mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="relative">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/50">
-                  <Camera size={22} className="text-white" />
-                </div>
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-500/30">
+                <Camera size={22} className="text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">PortfolioShot</h1>
-                <p className="text-xs text-gray-400">Beautiful mockups in seconds</p>
+                <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">PortfolioShot</h1>
+                <p className="text-xs text-gray-600">Template Maker</p>
               </div>
             </div>
-            <div className="flex items-center gap-2 text-sm text-gray-400">
-              <div className="px-3 py-1 rounded-full bg-white/5 backdrop-blur-sm border border-white/10 flex items-center gap-1.5">
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <div className="px-3 py-1 rounded-full bg-gray-100 border border-gray-200 flex items-center gap-1.5">
                 <Layers size={12} />
                 <span className="text-xs">1920×1080</span>
               </div>
@@ -203,18 +944,18 @@ function App() {
 
       <div className="relative z-10 flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <aside className="w-80 border-r border-white/5 backdrop-blur-xl p-6 flex flex-col gap-6 overflow-y-auto flex-shrink-0">
+        <aside className="w-80 border-r border-gray-200 backdrop-blur-xl bg-white/80 p-6 flex flex-col gap-6 overflow-y-auto flex-shrink-0">
           {/* URL Input Section */}
-          <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10">
+          <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
             <div className="flex items-center gap-2 mb-4">
-              <Link2 size={16} className="text-blue-400" />
-              <h2 className="font-semibold text-sm text-white">Website URL</h2>
+              <Link2 size={16} className="text-blue-600" />
+              <h2 className="font-semibold text-sm text-gray-900">Website URL</h2>
             </div>
             <form onSubmit={handleScreenshot} className="space-y-3">
               <input
                 type="text"
                 placeholder="https://example.com"
-                className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder:text-gray-500 focus:outline-none focus:border-blue-500/50 transition-colors"
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-xl text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 required
@@ -223,14 +964,14 @@ function App() {
                 type="submit"
                 className={`w-full px-4 py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
                   loading
-                    ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-blue-500 to-purple-600 text-white hover:shadow-lg hover:shadow-blue-500/50'
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:shadow-lg hover:shadow-blue-500/30 hover:scale-[1.02]'
                 }`}
                 disabled={loading}
               >
                 {loading ? (
                   <>
-                    <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                    <span className="inline-block w-4 h-4 border-2 border-gray-400 border-t-gray-600 rounded-full animate-spin"></span>
                     Capturing...
                   </>
                 ) : (
@@ -244,12 +985,12 @@ function App() {
           </div>
 
           {/* Display Mode Section */}
-          <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10">
+          <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
             <div className="flex items-center gap-2 mb-4">
-              <Eye size={16} className="text-blue-400" />
-              <h2 className="font-semibold text-sm text-white">Display Mode</h2>
+              <Eye size={16} className="text-blue-600" />
+              <h2 className="font-semibold text-sm text-gray-900">Display Mode</h2>
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2 mb-4">
               {[
                 { value: 'both', label: 'Both', icons: [Monitor, Smartphone] },
                 { value: 'desktop', label: 'Desktop', icons: [Monitor] },
@@ -259,8 +1000,8 @@ function App() {
                   key={mode.value}
                   className={`flex flex-col items-center gap-1.5 p-3 rounded-xl transition-all duration-200 ${
                     displayMode === mode.value
-                      ? 'bg-blue-500/20 border border-blue-500/50 text-blue-400'
-                      : 'bg-white/5 border border-white/10 text-gray-400 hover:border-white/20'
+                      ? 'bg-blue-50 border border-blue-500 text-blue-600'
+                      : 'bg-gray-50 border border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-100'
                   }`}
                   onClick={() => setDisplayMode(mode.value)}
                 >
@@ -271,16 +1012,120 @@ function App() {
                 </button>
               ))}
             </div>
+
+            {displayMode === 'both' && (
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-sm text-gray-900">Overlap Mode</span>
+                  <input
+                    type="checkbox"
+                    className="toggle toggle-sm toggle-primary"
+                    checked={overlap}
+                    onChange={(e) => setOverlap(e.target.checked)}
+                  />
+                </label>
+                <p className="text-xs text-gray-600 mt-2">Mobile screen overlaps desktop</p>
+              </div>
+            )}
+            
+            {/* Shadow Toggle */}
+            <div className="mt-3 pt-3 border-t border-gray-200">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="text-sm text-gray-900">Shadow Effect</span>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-sm toggle-primary"
+                  checked={enableShadow}
+                  onChange={(e) => setEnableShadow(e.target.checked)}
+                />
+              </label>
+              <p className="text-xs text-gray-600 mt-2">Add shadow to screenshots</p>
+            </div>
+
+            {/* Mockup Toggle */}
+            <div className="mt-3 pt-3 border-t border-gray-200">
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className="text-sm text-gray-900">Device Mockups</span>
+                <input
+                  type="checkbox"
+                  className="toggle toggle-sm toggle-primary"
+                  checked={showMockups}
+                  onChange={(e) => setShowMockups(e.target.checked)}
+                />
+              </label>
+              <p className="text-xs text-gray-600 mt-2">Show device frames</p>
+            </div>
+
+            {/* Desktop Border Radius Slider */}
+            <div className="mt-3 pt-3 border-t border-gray-200">
+              <label className="flex items-center justify-between mb-2">
+                <span className="text-sm text-gray-900">Desktop Border Radius</span>
+                <span className="text-xs font-mono text-gray-600">{desktopBorderRadius}px</span>
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="40"
+                step="1"
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                value={desktopBorderRadius}
+                onChange={(e) => setDesktopBorderRadius(parseInt(e.target.value))}
+              />
+            </div>
+
+            {/* Mobile Border Radius Slider */}
+            <div className="mt-3 pt-3 border-t border-gray-200">
+              <label className="flex items-center justify-between mb-2">
+                <span className="text-sm text-gray-900">Mobile Border Radius</span>
+                <span className="text-xs font-mono text-gray-600">{mobileBorderRadius}px</span>
+              </label>
+              <input
+                type="range"
+                min="0"
+                max="40"
+                step="1"
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                value={mobileBorderRadius}
+                onChange={(e) => setMobileBorderRadius(parseInt(e.target.value))}
+              />
+            </div>
+          </div>
+
+          {/* Canvas Size Section */}
+          <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+            <div className="flex items-center gap-2 mb-4">
+              <Layers size={16} className="text-blue-600" />
+              <h2 className="font-semibold text-sm text-gray-900">Canvas Size</h2>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { value: '16:9', label: '16:9', dimension: '1920×1080' },
+                { value: '3:2', label: '3:2', dimension: '1800×1200' },
+                { value: '1:1', label: '1:1', dimension: '1080×1080' },
+              ].map((size) => (
+                <button
+                  key={size.value}
+                  className={`flex flex-col items-center gap-1 p-3 rounded-xl transition-all duration-200 ${
+                    canvasSize === size.value
+                      ? 'bg-blue-50 border border-blue-500 text-blue-600'
+                      : 'bg-gray-50 border border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-gray-100'
+                  }`}
+                  onClick={() => setCanvasSize(size.value)}
+                >
+                  <span className="text-sm font-semibold">{size.label}</span>
+                  <span className="text-xs text-gray-500">{size.dimension}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Background Color Section */}
-          <div className="bg-white/5 backdrop-blur-lg rounded-2xl p-5 border border-white/10 flex-1">
+          <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
             <div className="flex items-center gap-2 mb-4">
-              <Palette size={16} className="text-blue-400" />
-              <h2 className="font-semibold text-sm text-white">Background</h2>
+              <Palette size={16} className="text-blue-600" />
+              <h2 className="font-semibold text-sm text-gray-900">Background</h2>
             </div>
 
-            {/* Color picker */}
             <div className="mb-4">
               <div className="relative group">
                 <input
@@ -290,26 +1135,25 @@ function App() {
                   onChange={(e) => setBgColor(e.target.value)}
                 />
                 <div
-                  className="w-full h-14 rounded-xl border-2 border-white/10 transition-all duration-200 group-hover:border-white/30"
+                  className="w-full h-14 rounded-xl border-2 border-gray-300 transition-all duration-200 group-hover:border-blue-500"
                   style={{ backgroundColor: bgColor }}
                 />
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-black/60 rounded text-xs font-mono text-white">
+                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-black/70 rounded text-xs font-mono text-white">
                   {bgColor.toUpperCase()}
                 </div>
               </div>
             </div>
 
-            {/* Preset colors */}
             <div>
-              <p className="text-xs text-gray-400 mb-3">Presets</p>
+              <p className="text-xs text-gray-600 mb-3">Presets</p>
               <div className="grid grid-cols-4 gap-2">
                 {presetColors.map(({ color, name }) => (
                   <button
                     key={color}
                     className={`w-full h-10 rounded-lg transition-all duration-200 border-2 ${
                       bgColor === color
-                        ? 'border-blue-400 scale-110'
-                        : 'border-white/10 hover:border-white/30'
+                        ? 'border-blue-500 scale-110 shadow-md'
+                        : 'border-gray-300 hover:border-blue-400'
                     }`}
                     style={{ backgroundColor: color }}
                     onClick={() => setBgColor(color)}
@@ -320,13 +1164,139 @@ function App() {
             </div>
           </div>
 
+          {/* Element Properties */}
+          {selectedEl && (
+            <div className="bg-white rounded-2xl p-5 border border-gray-200 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="font-semibold text-sm text-gray-900">Element Properties</h2>
+                <button
+                  onClick={() => deleteElement(selectedEl.id)}
+                  className="text-red-600 hover:text-red-700"
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+
+              {selectedEl.type === 'text' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs text-gray-600 mb-1 block">Text</label>
+                    <input
+                      type="text"
+                      className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm"
+                      value={selectedEl.content}
+                      onChange={(e) => updateElement(selectedEl.id, { content: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-600 mb-1 block">Font</label>
+                      <select
+                        className="w-full px-2 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-sm"
+                        value={selectedEl.fontFamily}
+                        onChange={(e) => updateElement(selectedEl.id, { fontFamily: e.target.value })}
+                      >
+                        <option value="Arial">Arial</option>
+                        <option value="Helvetica">Helvetica</option>
+                        <option value="Georgia">Georgia</option>
+                        <option value="Times New Roman">Times New Roman</option>
+                        <option value="Courier New">Courier New</option>
+                        <option value="Verdana">Verdana</option>
+                        <option value="Impact">Impact</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600 mb-1 block">Size</label>
+                      <input
+                        type="number"
+                        min="12"
+                        max="200"
+                        className="w-full px-2 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-sm"
+                        value={selectedEl.fontSize}
+                        onChange={(e) => updateElement(selectedEl.id, { fontSize: parseInt(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-600 mb-1 block">Color</label>
+                    <input
+                      type="color"
+                      className="w-full h-10 rounded-lg cursor-pointer"
+                      value={selectedEl.color}
+                      onChange={(e) => updateElement(selectedEl.id, { color: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-600 mb-1 block">Alignment</label>
+                    <select
+                      className="w-full px-2 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-sm"
+                      value={selectedEl.textAlign}
+                      onChange={(e) => updateElement(selectedEl.id, { textAlign: e.target.value })}
+                    >
+                      <option value="left">Left</option>
+                      <option value="center">Center</option>
+                      <option value="right">Right</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {selectedEl.type === 'image' && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-600 mb-1 block">Width</label>
+                      <input
+                        type="number"
+                        min="50"
+                        max="1920"
+                        className="w-full px-2 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-sm"
+                        value={selectedEl.width}
+                        onChange={(e) => updateElement(selectedEl.id, { width: parseInt(e.target.value) })}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-600 mb-1 block">Height</label>
+                      <input
+                        type="number"
+                        min="50"
+                        max="1080"
+                        className="w-full px-2 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-sm"
+                        value={selectedEl.height}
+                        onChange={(e) => updateElement(selectedEl.id, { height: parseInt(e.target.value) })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Download Section */}
           <div className="space-y-3">
             <button
               className={`w-full px-4 py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
                 desktopSrc && mobileSrc
-                  ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:shadow-lg hover:shadow-green-500/50'
-                  : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  ? 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/30 hover:scale-[1.02]'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+              onClick={async () => {
+                if (desktopSrc && mobileSrc) {
+                  await loadConfig();
+                  drawCanvas();
+                }
+              }}
+              disabled={!desktopSrc || !mobileSrc}
+            >
+              <RefreshCw size={18} />
+              Refresh Canvas
+            </button>
+            
+            <button
+              className={`w-full px-4 py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
+                desktopSrc && mobileSrc
+                  ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:shadow-lg hover:shadow-green-500/30 hover:scale-[1.02]'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
               }`}
               onClick={handleDownload}
               disabled={!desktopSrc || !mobileSrc}
@@ -335,42 +1305,42 @@ function App() {
               Download PNG
             </button>
 
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/20">
-              <Info size={14} className="text-blue-400 shrink-0" />
-              <span className="text-xs text-blue-300">Full HD output • 1920×1080px</span>
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200">
+              <Info size={14} className="text-blue-600 shrink-0" />
+              <span className="text-xs text-blue-700">Full HD output • 1920×1080px</span>
             </div>
           </div>
         </aside>
 
         {/* Main Canvas Area */}
-        <main className="flex-1 p-8 overflow-auto flex items-center justify-center">
+        <main className="flex-1 p-8 overflow-auto flex items-center justify-center bg-gray-100">
           {error && (
-            <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center gap-3">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <div className="absolute top-8 left-1/2 -translate-x-1/2 mb-6 p-4 rounded-xl bg-red-50 border border-red-200 flex items-center gap-3 z-50">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <span className="text-sm text-red-300">{error}</span>
+              <span className="text-sm text-red-700">{error}</span>
             </div>
           )}
 
           {!desktopSrc && !mobileSrc && !loading && (
-            <div className="bg-white/5 backdrop-blur-lg border border-white/10 rounded-3xl p-16 text-center max-w-lg">
+            <div className="bg-white rounded-3xl p-16 text-center max-w-lg border border-gray-200 shadow-lg">
               <div className="relative inline-block mb-6">
-                <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center animate-bounce">
-                  <Camera size={48} className="text-blue-400" />
+                <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center animate-bounce border border-blue-200">
+                  <Camera size={48} className="text-blue-600" />
                 </div>
-                <div className="absolute -inset-4 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-full blur-2xl -z-10" />
+                <div className="absolute -inset-4 bg-gradient-to-br from-blue-100/50 to-purple-100/50 rounded-full blur-2xl -z-10" />
               </div>
-              <h2 className="text-3xl font-bold mb-3 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Create Beautiful Shots</h2>
-              <p className="text-gray-400 leading-relaxed">
-                Enter any website URL to generate professional portfolio mockups showcasing desktop and mobile views.
+              <h2 className="text-3xl font-bold mb-3 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Create & Customize</h2>
+              <p className="text-gray-600 leading-relaxed">
+                Generate screenshots, add elements, and create reusable templates for your portfolio shots.
               </p>
               <div className="mt-8 flex items-center justify-center gap-6 text-sm text-gray-500">
                 <div className="flex items-center gap-2">
                   <Monitor size={16} />
                   <span>Desktop</span>
                 </div>
-                <div className="w-px h-4 bg-white/20" />
+                <div className="w-px h-4 bg-gray-300" />
                 <div className="flex items-center gap-2">
                   <Smartphone size={14} />
                   <span>Mobile</span>
@@ -382,26 +1352,23 @@ function App() {
           {loading && (
             <div className="text-center">
               <div className="relative inline-block mb-6">
-                <span className="inline-block w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></span>
-                <div className="absolute inset-0 bg-blue-500/30 rounded-full blur-xl -z-10 animate-pulse" />
+                <span className="inline-block w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></span>
+                <div className="absolute inset-0 bg-blue-200 rounded-full blur-xl -z-10 animate-pulse" />
               </div>
-              <p className="text-lg font-medium bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">Capturing screenshots...</p>
-              <p className="text-sm text-gray-400 mt-2">This may take a few seconds</p>
+              <p className="text-lg font-medium bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Capturing screenshots...</p>
+              <p className="text-sm text-gray-600 mt-2">This may take a few seconds</p>
             </div>
           )}
 
           {desktopSrc && mobileSrc && (
             <div className="flex flex-col items-center w-full">
-              <div className="bg-white/5 backdrop-blur-lg border border-white/10 rounded-2xl p-4 shadow-2xl">
+              <div className="bg-white rounded-2xl p-4 shadow-xl border border-gray-200">
                 <canvas
                   ref={canvasRef}
                   className="rounded-lg"
-                  style={{ width: '100%', maxWidth: '1200px', height: 'auto' }}
+                  style={{ width: '100%', maxWidth: '1200px', height: 'auto', display: 'block' }}
                 />
               </div>
-              <p className="mt-4 text-sm text-gray-400">
-                Click "Download PNG" to save your mockup
-              </p>
             </div>
           )}
         </main>

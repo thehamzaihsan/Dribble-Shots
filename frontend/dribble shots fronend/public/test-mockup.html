@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Mockup Loading</title>
+</head>
+<body>
+    <h1>Testing Mockup Images</h1>
+    
+    <h2>Desktop Mockup</h2>
+    <img src="/Desktop.png" alt="Desktop" style="max-width: 500px; border: 1px solid red;">
+    
+    <h2>Android Mockup</h2>
+    <img src="/Android.png" alt="Android" style="max-width: 200px; border: 1px solid blue;">
+    
+    <h2>Canvas Test</h2>
+    <canvas id="testCanvas" width="500" height="500" style="border: 1px solid green;"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('testCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        ctx.fillStyle = '#f0f0f0';
+        ctx.fillRect(0, 0, 500, 500);
+        
+        const androidImg = new Image();
+        androidImg.onload = () => {
+            console.log('Android image loaded successfully!');
+            console.log('Width:', androidImg.width, 'Height:', androidImg.height);
+            ctx.drawImage(androidImg, 50, 50, 100, 200);
+        };
+        androidImg.onerror = (e) => {
+            console.error('Failed to load Android image:', e);
+        };
+        androidImg.src = '/Android.png';
+        
+        console.log('Loading Android.png...');
+    </script>
+</body>
+</html>
