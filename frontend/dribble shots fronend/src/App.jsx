@@ -16,7 +16,7 @@ function App() {
     try {
       // 1. Send Request to Backend
       // Note: We use encodeURIComponent to safely pass URL parameters
-      const response = await fetch(`http://localhost:8000/screenshot?url=${encodeURIComponent(url)}`);
+      const response = await fetch(`https://dribble-shots.onrender.com/screenshot?url=${encodeURIComponent(url)}`);
 
       if (!response.ok) {
         throw new Error('Failed to capture screenshot');
