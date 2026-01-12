@@ -4,6 +4,7 @@ import base64
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from playwright.async_api import async_playwright, Page
 
 # Fix for Windows Event Loop (Only affects local Windows testing)
@@ -11,6 +12,10 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 app = FastAPI()
+
+class CaptureRequest(BaseModel):
+    url: str
+    scroll_to_bottom: bool = True
 
 # --- HEALTH CHECK (Required for Render) ---
 # Render pings the root URL to check if the app is alive.
@@ -112,9 +117,12 @@ async def screenshot(url: str):
             print("7. Closing Browser")
             await browser.close()
 
-@app.get("/screenshot-both")
-async def screenshot_both(url: str):
-    print(f"1. Received request for both desktop and mobile: {url}")
+@app.post("/capture")
+async def capture(request: CaptureRequest):
+    url = request.url
+    scroll_to_bottom = request.scroll_to_bottom
+    
+    print(f"1. Received request for both desktop and mobile: {url} (scroll: {scroll_to_bottom})")
 
     if not url.startswith("http"):
         url = f"https://{url}"
@@ -152,7 +160,10 @@ async def screenshot_both(url: str):
             desktop_page = await desktop_context.new_page()
             print(f"4a. Navigating to {url} (desktop)...")
             await desktop_page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            await slow_scroll_and_load(desktop_page)
+            if scroll_to_bottom:
+                await slow_scroll_and_load(desktop_page)
+            else:
+                await asyncio.sleep(2)  # Wait for page to settle
             print("5a. Taking desktop screenshot...")
             desktop_bytes = await desktop_page.screenshot(full_page=True, animations="allow")
             print(f"   -> Desktop screenshot captured: {len(desktop_bytes)} bytes")
@@ -176,7 +187,10 @@ async def screenshot_both(url: str):
             mobile_page = await mobile_context.new_page()
             print(f"4b. Navigating to {url} (mobile)...")
             await mobile_page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            await slow_scroll_and_load(mobile_page)
+            if scroll_to_bottom:
+                await slow_scroll_and_load(mobile_page)
+            else:
+                await asyncio.sleep(2)  # Wait for page to settle
             print("5b. Taking mobile screenshot...")
             mobile_bytes = await mobile_page.screenshot(full_page=True, animations="allow")
             print(f"   -> Mobile screenshot captured: {len(mobile_bytes)} bytes")
@@ -200,3 +214,9 @@ async def screenshot_both(url: str):
                 await mobile_context.close()
             print("7. Closing Browser")
             await browser.close()
+
+# Keep old endpoint for backward compatibility
+@app.get("/screenshot-both")
+async def screenshot_both(url: str):
+    request = CaptureRequest(url=url, scroll_to_bottom=True)
+    return await capture(request)
