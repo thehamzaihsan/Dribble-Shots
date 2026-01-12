@@ -1,0 +1,132 @@
+{
+  "canvas": {
+    "width": 1920,
+    "height": 1080
+  },
+  "desktopOnly": {
+    "mockup": {
+      "x": 120,
+      "y": 162,
+      "width": 1680,
+      "height": 918
+    },
+    "screenshot": {
+      "x": 120,
+      "y": 162,
+      "width": 1680,
+      "height": 918,
+      "sourceX": 0,
+      "sourceY": 0
+    }
+  },
+  "mobileOnly": {
+    "mockup": {
+      "x": 710,
+      "y": 108,
+      "width": 500,
+      "height": 972
+    },
+    "screenshot": {
+      "x": 710,
+      "y": 108,
+      "width": 500,
+      "height": 972,
+      "sourceX": 0,
+      "sourceY": 0
+    }
+  },
+  "bothMode": {
+    "normal": {
+      "desktop": {
+        "mockup": {
+          "x": 191,
+          "y": 206,
+          "width": 1350,
+          "height": 864
+        },
+        "screenshot": {
+          "x": 326,
+          "y": 235,
+          "width": 1350,
+          "height": 864,
+          "sourceX": 0,
+          "sourceY": 0
+        }
+      },
+      "mobile": {
+        "mockup": {
+          "x": 1450,
+          "y": 324,
+          "width": 410,
+          "height": 756
+        },
+        "screenshot": {
+          "x": 1450,
+          "y": 320,
+          "width": 410,
+          "height": 756,
+          "sourceX": 0,
+          "sourceY": 0
+        }
+      }
+    },
+    "overlap": {
+      "desktop": {
+        "mockup": {
+          "x": 191,
+          "y": 206,
+          "width": 1350,
+          "height": 900
+        },
+        "screenshot": {
+          "x": 326,
+          "y": 235,
+          "width": 1080,
+          "height": 790,
+          "sourceX": 0,
+          "sourceY": 0
+        }
+      },
+      "mobile": {
+        "mockup": {
+          "x": 1316,
+          "y": 349,
+          "width": 410,
+          "height": 876
+        },
+        "screenshot": {
+          "x": 1330,
+          "y": 362,
+          "width": 380,
+          "height": 876,
+          "sourceX": 0,
+          "sourceY": 0
+        }
+      }
+    }
+  },
+  "shadow": {
+    "desktop": {
+      "color": "rgba(0, 0, 0, 0.3)",
+      "blur": 40,
+      "offsetX": 0,
+      "offsetY": 20
+    },
+    "mobile": {
+      "color": "rgba(0, 0, 0, 0.3)",
+      "blur": 40,
+      "offsetX": 0,
+      "offsetY": 20
+    },
+    "mobileOverlap": {
+      "color": "rgba(0, 0, 0, 0.3)",
+      "blur": 30,
+      "offsetX": -5,
+      "offsetY": 10
+    }
+  },
+  "mockups": {
+    "desktop": "/Desktop.png",
+    "mobile": "/Android.png"
+  }
+}

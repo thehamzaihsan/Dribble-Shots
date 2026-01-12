@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg width="125" height="125" viewBox="0 0 125 125" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="clip_path_1">
+      <rect width="125" height="125" rx="16" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#clip_path_1)">
+    <rect width="125" height="125" fill="#5151E3" fill-rule="evenodd" />
+    <g transform="translate(33 7)">
+      <g transform="translate(1.655 0)">
+        <path d="M27.5 0L55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0Z" />
+        <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#FFFFFF" fill-rule="evenodd" />
+      </g>
+      <g transform="translate(1.655 42)">
+        <path d="M27.5 0L55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0Z" />
+        <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#FFFFFF" fill-rule="evenodd" />
+      </g>
+      <rect width="59" height="28" fill="#5151E3" fill-rule="evenodd" />
+      <rect width="59" height="28" fill="#5151E3" fill-rule="evenodd" transform="translate(0 83)" />
+      <path d="M0 0L9.1781 5.7424" fill="none" stroke-width="1" stroke="#5151E3" stroke-linecap="square" transform="translate(6.799 55.58)" />
+      <path d="M8.86774 0L0 5.59073" fill="none" stroke-width="1" stroke="#5151E3" stroke-linecap="square" transform="translate(42.573 55.6)" />
+      <path d="M0 0L9.41765 5.91177" fill="none" stroke-width="1" stroke="#5151E3" stroke-linecap="square" transform="translate(16.129 49.629)" />
+      <path d="M9.49545 0L0 5.96036" fill="none" stroke-width="1" stroke="#5151E3" stroke-linecap="square" transform="translate(33.156 49.322)" />
+    </g>
+  </g>
+</svg>
