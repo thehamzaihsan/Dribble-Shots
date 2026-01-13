@@ -5,8 +5,13 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# --- CHANGE HERE: Install Chromium instead of Firefox ---
+# Install Chromium
 RUN playwright install chromium
+
+# --- CRITICAL FIXES FOR STABILITY ---
+# Disable Audio subsystem to prevent crashes
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV PULSE_SERVER=/dev/null
 
 COPY . .
 
