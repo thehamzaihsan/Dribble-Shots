@@ -13,6 +13,7 @@ function App() {
   const [uploadedDesktop, setUploadedDesktop] = useState(null);
   const [uploadedMobile, setUploadedMobile] = useState(null);
   const [scrollToBottom, setScrollToBottom] = useState(false);
+  const [useCache, setUseCache] = useState(true);
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState('');
@@ -154,7 +155,7 @@ function App() {
     setQueuePosition(0);
     setJobId(null);
 
-    const API_BASE = 'http://localhost:8000';
+    const API_BASE = 'http://t4k4os0c4s04wcgscggwccoo.198.96.88.161.sslip.io';
 
     try {
       // Submit job to queue
@@ -163,7 +164,8 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           url: url.trim(),
-          scroll_to_bottom: scrollToBottom 
+          scroll_to_bottom: scrollToBottom,
+          use_cache: useCache
         }),
       });
 
@@ -753,7 +755,7 @@ function App() {
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
 
-                <div className="mt-4">
+                <div className="mt-4 space-y-3">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -762,6 +764,18 @@ function App() {
                       className="w-4 h-4 text-blue-600 rounded"
                     />
                     <span className="text-sm text-gray-700">Scroll to bottom before capturing</span>
+                  </label>
+                  
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useCache}
+                      onChange={(e) => setUseCache(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 rounded"
+                    />
+                    <span className="text-sm text-gray-700">
+                      Use cached screenshots (faster, valid for 1 hour)
+                    </span>
                   </label>
                 </div>
 

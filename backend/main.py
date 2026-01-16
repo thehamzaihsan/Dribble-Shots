@@ -73,10 +73,11 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 class Job:
-    def __init__(self, job_id: str, url: str, scroll_to_bottom: bool):
+    def __init__(self, job_id: str, url: str, scroll_to_bottom: bool, use_cache: bool = True):
         self.job_id = job_id
         self.url = url
         self.scroll_to_bottom = scroll_to_bottom
+        self.use_cache = use_cache
         self.status = JobStatus.QUEUED
         self.queue_position = 0
         self.result: Optional[Dict] = None
@@ -111,7 +112,7 @@ async def queue_worker():
             
             try:
                 # Process the capture
-                result = await process_capture(job.url, job.scroll_to_bottom)
+                result = await process_capture(job.url, job.scroll_to_bottom, job.use_cache)
                 
                 # Store result
                 job.result = result
@@ -205,10 +206,12 @@ app = FastAPI(lifespan=lifespan)
 class CaptureRequest(BaseModel):
     url: str
     scroll_to_bottom: bool = True
+    use_cache: bool = True
 
 class QueueJobRequest(BaseModel):
     url: str
     scroll_to_bottom: bool = True
+    use_cache: bool = True
 
 # --- HEALTH CHECK (Required for Render) ---
 # Render pings the root URL to check if the app is alive.
@@ -233,6 +236,17 @@ def cache_stats():
         "active_entries": active_entries,
         "expired_entries": expired_entries,
         "cache_duration_hours": 1
+    }
+
+@app.delete("/cache/clear")
+def clear_cache():
+    """Clear all cache entries"""
+    global screenshot_cache
+    count = len(screenshot_cache)
+    screenshot_cache.clear()
+    return {
+        "message": f"Cleared {count} cache entries",
+        "remaining_entries": len(screenshot_cache)
     }
 
 app.add_middleware(
@@ -411,15 +425,18 @@ async def screenshot(url: str):
         print("🧹 Cleaning up context...")
         await context.close()
 
-async def process_capture(url: str, scroll_to_bottom: bool) -> Dict:
+async def process_capture(url: str, scroll_to_bottom: bool, use_cache: bool = True) -> Dict:
     """Process a capture request - extracted for reuse in queue worker"""
     if not url.startswith("http"):
         url = f"https://{url}"
     
-    # Check cache first
-    cached_result = get_from_cache(url, scroll_to_bottom)
-    if cached_result:
-        return cached_result
+    # Check cache first if use_cache is True
+    if use_cache:
+        cached_result = get_from_cache(url, scroll_to_bottom)
+        if cached_result:
+            return cached_result
+    else:
+        print("⚠️  Cache disabled for this request")
     
     if not browser:
         raise Exception("Browser not initialized")
@@ -438,8 +455,9 @@ async def process_capture(url: str, scroll_to_bottom: bool) -> Dict:
         
         print(f"✅ Success! Desktop: {len(desktop_bytes)} bytes, Mobile: {len(mobile_bytes)} bytes")
         
-        # Save to cache
+        # Always save to cache (replace existing if any)
         save_to_cache(url, scroll_to_bottom, desktop_base64, mobile_base64)
+        print(f"💾 Cache updated/replaced for {url}")
         
         # Return result
         return {
@@ -460,14 +478,15 @@ async def queue_capture(request: QueueJobRequest):
     queue_position = sum(1 for j in jobs.values() if j.status in [JobStatus.QUEUED, JobStatus.PROCESSING]) + 1
     
     # Create job
-    job = Job(job_id, request.url, request.scroll_to_bottom)
+    job = Job(job_id, request.url, request.scroll_to_bottom, request.use_cache)
     job.queue_position = queue_position
     jobs[job_id] = job
     
     # Add to queue
     await job_queue.put(job)
     
-    print(f"📋 Job {job_id} queued at position {queue_position}")
+    cache_msg = "with cache" if request.use_cache else "without cache"
+    print(f"📋 Job {job_id} queued at position {queue_position} ({cache_msg})")
     
     return JSONResponse({
         "job_id": job_id,
