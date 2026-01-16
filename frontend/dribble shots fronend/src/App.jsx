@@ -591,7 +591,7 @@ function App() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `dribble-shot-${Date.now()}.png`;
+      link.download = `portfolio-shot-${Date.now()}.png`;
       link.click();
       URL.revokeObjectURL(url);
     });
@@ -669,7 +669,7 @@ function App() {
             </div>
               <div>
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                  Dribble Shots
+                  Portfolio Shots
                 </h1>
                 <p className="text-xs text-gray-500">Create beautiful mockups in seconds by Hexa Devs</p>
               </div>
@@ -996,7 +996,7 @@ function App() {
               <>
                 {/* Actual Customization Panel - Scrollable */}
                 <div className="lg:col-span-1">
-                  <div className="lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:overflow-y-auto">
+                  <div className="lg:sticky lg:top-24 h-[calc(100vh-120px)] overflow-y-auto pr-2">
                     <div className="space-y-6">
                   <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-200">
                     <h3 className="font-bold text-lg mb-4">Customize</h3>

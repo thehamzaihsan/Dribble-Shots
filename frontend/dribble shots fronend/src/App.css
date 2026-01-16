@@ -1,3 +1,28 @@
+/* FORCE GLOBAL SCROLLING */
+html, body {
+  margin: 0;
+  padding: 0;
+  height: auto !important; /* Allow height to grow with content */
+  min-height: 100vh;
+  overflow-y: auto !important; /* Force vertical scroll availability */
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* FIX STICKY BEHAVIOR ON MOBILE */
+@media (max-width: 1024px) {
+  .lg\:sticky {
+    position: relative !important; /* Disable sticky so page scrolls naturally */
+    top: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+}
 /* Custom Fonts */
 @font-face {
   font-family: 'Aeonik';
