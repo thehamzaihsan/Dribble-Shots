@@ -258,8 +258,16 @@ async def process_capture(url: str, scroll_to_bottom: bool) -> Dict:
             await slow_scroll_and_load(desktop_page)
         else:
             await asyncio.sleep(2)  # Wait for page to settle
-        print("📷 Taking desktop screenshot...")
-        desktop_bytes = await desktop_page.screenshot(full_page=True, animations="allow")
+        
+        # Get page height and calculate 30% clip
+        page_height = await desktop_page.evaluate("document.documentElement.scrollHeight")
+        clip_height = int(page_height * 0.3)
+        
+        print(f"📷 Taking desktop screenshot (first 30%: {clip_height}px of {page_height}px)...")
+        desktop_bytes = await desktop_page.screenshot(
+            clip={"x": 0, "y": 0, "width": 1920, "height": clip_height},
+            animations="allow"
+        )
         print(f"   ✅ Desktop screenshot captured: {len(desktop_bytes)} bytes")
         
         # --- MOBILE SCREENSHOT ---
@@ -285,8 +293,16 @@ async def process_capture(url: str, scroll_to_bottom: bool) -> Dict:
             await slow_scroll_and_load(mobile_page)
         else:
             await asyncio.sleep(2)  # Wait for page to settle
-        print("📷 Taking mobile screenshot...")
-        mobile_bytes = await mobile_page.screenshot(full_page=True, animations="allow")
+        
+        # Get page height and calculate 30% clip
+        page_height = await mobile_page.evaluate("document.documentElement.scrollHeight")
+        clip_height = int(page_height * 0.3)
+        
+        print(f"📷 Taking mobile screenshot (first 30%: {clip_height}px of {page_height}px)...")
+        mobile_bytes = await mobile_page.screenshot(
+            clip={"x": 0, "y": 0, "width": 390, "height": clip_height},
+            animations="allow"
+        )
         print(f"   ✅ Mobile screenshot captured: {len(mobile_bytes)} bytes")
         
         print(f"✅ Success! Desktop: {len(desktop_bytes)} bytes, Mobile: {len(mobile_bytes)} bytes")
