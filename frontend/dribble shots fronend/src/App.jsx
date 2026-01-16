@@ -18,6 +18,8 @@ function App() {
   const [loadingMessage, setLoadingMessage] = useState('');
   const [error, setError] = useState(null);
   const [imagesLoading, setImagesLoading] = useState(false);
+  const [queuePosition, setQueuePosition] = useState(0);
+  const [jobId, setJobId] = useState(null);
   
   // Screenshots from backend
   const [desktopSrc, setDesktopSrc] = useState(null);
@@ -147,22 +149,16 @@ function App() {
 
     setLoading(true);
     setLoadingProgress(0);
-    setLoadingMessage('Initializing browser...');
+    setLoadingMessage('Submitting request to queue...');
     setError(null);
+    setQueuePosition(0);
+    setJobId(null);
 
-    // Simulate progress
-    const progressInterval = setInterval(() => {
-      setLoadingProgress(prev => {
-        if (prev >= 90) return prev;
-        return prev + Math.random() * 15;
-      });
-    }, 500);
+    const API_BASE = 'http://localhost:8000';
 
     try {
-      setLoadingMessage('Navigating to website...');
-      setLoadingProgress(20);
-
-      const response = await fetch('http://localhost:8000/capture', {
+      // Submit job to queue
+      const queueResponse = await fetch(`${API_BASE}/capture/queue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -171,37 +167,79 @@ function App() {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch screenshots');
+      if (!queueResponse.ok) {
+        throw new Error('Failed to submit job to queue');
       }
 
-      setLoadingMessage('Processing screenshots...');
-      setLoadingProgress(70);
+      const queueData = await queueResponse.json();
+      const currentJobId = queueData.job_id;
+      const initialPosition = queueData.queue_position;
+      
+      setJobId(currentJobId);
+      setQueuePosition(initialPosition);
+      setLoadingMessage(`Queued at position ${initialPosition}...`);
+      setLoadingProgress(10);
 
-      const data = await response.json();
-      
-      setLoadingMessage('Almost done...');
-      setLoadingProgress(90);
+      // Poll for job status
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await fetch(`${API_BASE}/capture/status/${currentJobId}`);
+          
+          if (!statusResponse.ok) {
+            throw new Error('Failed to check job status');
+          }
 
-      setDesktopSrc(`data:image/png;base64,${data.desktop}`);
-      setMobileSrc(`data:image/png;base64,${data.mobile}`);
-      
-      setLoadingProgress(100);
-      setLoadingMessage('Complete!');
-      
-      clearInterval(progressInterval);
-      
-      // Small delay to show completion
-      setTimeout(() => {
-        setCurrentStep(2); // Move to template selection
-        setLoading(false);
-      }, 300);
+          const statusData = await statusResponse.json();
+          
+          // Update queue position
+          if (statusData.queue_position > 0) {
+            setQueuePosition(statusData.queue_position);
+            setLoadingMessage(`Waiting in queue... Position: ${statusData.queue_position}`);
+            setLoadingProgress(10 + (statusData.queue_position === 1 ? 20 : 0));
+          } else if (statusData.status === 'processing') {
+            setQueuePosition(0);
+            setLoadingMessage('Processing your request...');
+            setLoadingProgress(30);
+          } else if (statusData.status === 'completed') {
+            clearInterval(pollInterval);
+            
+            setLoadingMessage('Processing screenshots...');
+            setLoadingProgress(70);
+            
+            setDesktopSrc(`data:image/png;base64,${statusData.result.desktop}`);
+            setMobileSrc(`data:image/png;base64,${statusData.result.mobile}`);
+            
+            setLoadingProgress(100);
+            setLoadingMessage('Complete!');
+            setQueuePosition(0);
+            
+            // Small delay to show completion
+            setTimeout(() => {
+              setCurrentStep(2); // Move to template selection
+              setLoading(false);
+              setJobId(null);
+            }, 300);
+            
+          } else if (statusData.status === 'failed') {
+            clearInterval(pollInterval);
+            throw new Error(statusData.error || 'Job failed');
+          }
+        } catch (err) {
+          clearInterval(pollInterval);
+          setError(err.message);
+          setLoading(false);
+          setLoadingProgress(0);
+          setQueuePosition(0);
+          setJobId(null);
+        }
+      }, 2000); // Poll every 2 seconds
       
     } catch (err) {
-      clearInterval(progressInterval);
       setError(err.message);
       setLoading(false);
       setLoadingProgress(0);
+      setQueuePosition(0);
+      setJobId(null);
     }
   };
 
@@ -580,6 +618,8 @@ function App() {
     setLoadingProgress(0);
     setLoadingMessage('');
     setImagesLoading(false);
+    setQueuePosition(0);
+    setJobId(null);
     setBgColor('#ffffff');
     setTextColor('#000000');
     setFontFamily('Aeonik');
@@ -738,6 +778,14 @@ function App() {
                       <span className="text-gray-600">{loadingMessage}</span>
                       <span className="font-semibold text-blue-600">{Math.round(loadingProgress)}%</span>
                     </div>
+                    {queuePosition > 0 && (
+                      <div className="mb-2 text-sm text-center">
+                        <span className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full font-medium">
+                          <span>Queue Position:</span>
+                          <span className="text-lg font-bold">{queuePosition}</span>
+                        </span>
+                      </div>
+                    )}
                     <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
                       <div 
                         className="bg-gradient-to-r from-blue-600 to-purple-600 h-3 rounded-full transition-all duration-500 ease-out"

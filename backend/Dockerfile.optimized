@@ -1,0 +1,47 @@
+# Optimized Production Dockerfile for Dribble Shots Backend
+# Multi-stage build for smaller image size
+
+# Stage 1: Build stage
+FROM mcr.microsoft.com/playwright/python:v1.41.0-jammy as builder
+
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Playwright browsers
+RUN playwright install chromium
+RUN playwright install-deps chromium
+
+# Stage 2: Production stage
+FROM mcr.microsoft.com/playwright/python:v1.41.0-jammy
+
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /root/.cache /root/.cache
+COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copy application code
+COPY . .
+
+# Create non-root user for security
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/ || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Run the application
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

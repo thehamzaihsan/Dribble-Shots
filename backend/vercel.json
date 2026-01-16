@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "main-vercel.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "main-vercel.py"
+    }
+  ],
+  "functions": {
+    "main-vercel.py": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  }
+}
+
