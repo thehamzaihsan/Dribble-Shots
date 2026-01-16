@@ -1,0 +1,23 @@
+# Render.com Deployment Configuration
+
+services:
+  - type: web
+    name: dribble-shots-backend
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /
+    
+    # Environment Variables (optional)
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: PYTHONUNBUFFERED
+        value: 1
+    
+    # Build settings
+    dockerfilePath: ./Dockerfile
+    dockerContext: ./
+    
+    # Auto-deploy on push to main
+    autoDeploy: true
