@@ -155,7 +155,7 @@ function App() {
     setQueuePosition(0);
     setJobId(null);
 
-    const API_BASE = 'http://t4k4os0c4s04wcgscggwccoo.198.96.88.161.sslip.io';
+    const API_BASE = import.meta.env.VITE_API_BASE_URL;
 
     try {
       // Submit job to queue
