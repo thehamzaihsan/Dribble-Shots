@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
-import { Upload, Link2, Download, Palette, Type, CheckCircle2, ArrowRight, Loader2, RefreshCw, Sparkles, Zap, Layers, MousePointer, Image, Monitor, Smartphone, Globe, Play } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Upload, Link2, Download, Palette, Type, CheckCircle2, ArrowRight, Loader2, RefreshCw, Sparkles, Zap, Layers, MousePointer, Monitor, Smartphone, Globe, Play } from 'lucide-react';
 import { HexColorPicker } from 'react-colorful';
 import './App.css';
 
 function App() {
-  // Workflow steps: 0 = Landing, 1 = Input, 2 = Template, 3 = Customize
-  const [currentStep, setCurrentStep] = useState(0); // 0: Landing, 1: Input, 2: Template, 3: Customize
+  const navigate = useNavigate();
+  // Workflow steps: 1 = Input, 2 = Template, 3 = Customize
+  const [currentStep, setCurrentStep] = useState(1); // 1: Input, 2: Template, 3: Customize
   
   // Step 1: Input
   const [inputMethod, setInputMethod] = useState('url'); // 'url' or 'upload'
@@ -241,7 +243,11 @@ function App() {
   // Draw canvas when template or customization changes
   useEffect(() => {
     if (templateData && (desktopSrc || mobileSrc) && currentStep >= 3) {
-      drawCanvas();
+      // Use a small timeout to ensure the canvas element is mounted
+      const timer = setTimeout(() => {
+        drawCanvas();
+      }, 100);
+      return () => clearTimeout(timer);
     }
   }, [templateData, desktopSrc, mobileSrc, bgColor, bgColor2, useGradient, gradientDirection, textColor, fontFamily, enableShadow, enableMockups, textContents, currentStep]);
 
@@ -525,44 +531,110 @@ function App() {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     };
 
-    drawBackground();
-
-    const desktopImg = new Image();
-    const mobileImg = new Image();
-    
-    let imagesLoaded = 0;
-    const totalImages = (templateData.devices?.desktop?.enabled && desktopSrc ? 1 : 0) + 
-                       (templateData.devices?.mobile?.enabled && mobileSrc ? 1 : 0) +
-                       (templateData.extraDevices?.filter(d => mobileSrc).length || 0);
-
-    const checkAndDraw = () => {
-      imagesLoaded++;
-      if (imagesLoaded === totalImages) {
-        renderAll();
-      }
+    // Helper to load an image as a promise
+    const loadImage = (src) => {
+      return new Promise((resolve, reject) => {
+        console.log('Loading image:', src);
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          console.log('Image loaded successfully:', src, img.width, 'x', img.height);
+          resolve(img);
+        };
+        img.onerror = (err) => {
+          console.error('Failed to load image:', src, err);
+          reject(err);
+        };
+        img.src = src;
+      });
     };
 
-    const renderAll = () => {
-      // Clear and redraw background
+    // Load all images first
+    const imagesToLoad = [];
+    
+    console.log('=== IMAGE LOADING DEBUG ===');
+    console.log('desktopSrc:', desktopSrc ? desktopSrc.substring(0, 50) + '...' : null);
+    console.log('mobileSrc:', mobileSrc ? mobileSrc.substring(0, 50) + '...' : null);
+    console.log('templateData.devices:', templateData.devices);
+    console.log('enableMockups:', enableMockups);
+    
+    if (templateData.devices?.desktop?.enabled && desktopSrc) {
+      console.log('Adding desktop screenshot to load queue');
+      imagesToLoad.push(loadImage(desktopSrc).then(img => ({ type: 'desktop', img })));
+      if (enableMockups && templateData.devices.desktop.mockupImage) {
+        console.log('Adding desktop mockup to load queue:', templateData.devices.desktop.mockupImage);
+        imagesToLoad.push(loadImage(templateData.devices.desktop.mockupImage).then(img => ({ type: 'desktopMockup', img })));
+      }
+    } else {
+      console.log('Desktop NOT added:', { enabled: templateData.devices?.desktop?.enabled, hasDesktopSrc: !!desktopSrc });
+    }
+    
+    if (templateData.devices?.mobile?.enabled && mobileSrc) {
+      console.log('Adding mobile screenshot to load queue');
+      imagesToLoad.push(loadImage(mobileSrc).then(img => ({ type: 'mobile', img })));
+      if (enableMockups && templateData.devices.mobile.mockupImage) {
+        console.log('Adding mobile mockup to load queue:', templateData.devices.mobile.mockupImage);
+        imagesToLoad.push(loadImage(templateData.devices.mobile.mockupImage).then(img => ({ type: 'mobileMockup', img })));
+      }
+    } else {
+      console.log('Mobile NOT added:', { enabled: templateData.devices?.mobile?.enabled, hasMobileSrc: !!mobileSrc });
+    }
+
+    // Load extra device mockups
+    if (templateData.extraDevices && mobileSrc) {
+      templateData.extraDevices.forEach((device, index) => {
+        if (enableMockups && device.mockupImage) {
+          imagesToLoad.push(loadImage(device.mockupImage).then(img => ({ type: `extraMockup${index}`, img })));
+        }
+      });
+    }
+
+    try {
+      console.log('Loading images...', imagesToLoad.length, 'images to load');
+      const loadedImages = await Promise.all(imagesToLoad);
+      const images = {};
+      loadedImages.forEach(({ type, img }) => {
+        images[type] = img;
+        console.log(`Loaded ${type}: ${img.width}x${img.height}`);
+      });
+
+      // Now draw everything
+      console.log('Drawing canvas...', { desktopSrc: !!desktopSrc, mobileSrc: !!mobileSrc, images: Object.keys(images) });
       drawBackground();
 
       // Draw desktop device
-      if (templateData.devices?.desktop?.enabled && desktopSrc) {
+      if (templateData.devices?.desktop?.enabled && desktopSrc && images.desktop) {
+        console.log('Drawing desktop device', { enableMockups, hasMockupImage: !!templateData.devices.desktop.mockupImage, hasMockupImg: !!images.desktopMockup });
         const device = templateData.devices.desktop;
-        drawDevice(ctx, desktopImg, device);
+        if (enableMockups && device.mockupImage && images.desktopMockup) {
+          drawDeviceWithMockupImageSync(ctx, images.desktop, images.desktopMockup, device);
+        } else {
+          drawSimpleDevice(ctx, images.desktop, device);
+        }
+      } else {
+        console.log('Skipping desktop device', { enabled: templateData.devices?.desktop?.enabled, hasDesktopSrc: !!desktopSrc, hasImage: !!images.desktop });
       }
 
       // Draw mobile device
-      if (templateData.devices?.mobile?.enabled && mobileSrc) {
+      if (templateData.devices?.mobile?.enabled && mobileSrc && images.mobile) {
+        console.log('Drawing mobile device', { enableMockups, hasMockupImage: !!templateData.devices.mobile.mockupImage, hasMockupImg: !!images.mobileMockup });
         const device = templateData.devices.mobile;
-        drawDevice(ctx, mobileImg, device);
+        if (enableMockups && device.mockupImage && images.mobileMockup) {
+          drawDeviceWithMockupImageSync(ctx, images.mobile, images.mobileMockup, device);
+        } else {
+          drawSimpleDevice(ctx, images.mobile, device);
+        }
+      } else {
+        console.log('Skipping mobile device', { enabled: templateData.devices?.mobile?.enabled, hasMobileSrc: !!mobileSrc, hasImage: !!images.mobile });
       }
 
       // Draw extra devices
-      if (templateData.extraDevices) {
-        templateData.extraDevices.forEach(device => {
-          if (mobileSrc) {
-            drawDevice(ctx, mobileImg, device);
+      if (templateData.extraDevices && mobileSrc && images.mobile) {
+        templateData.extraDevices.forEach((device, index) => {
+          if (enableMockups && device.mockupImage && images[`extraMockup${index}`]) {
+            drawDeviceWithMockupImageSync(ctx, images.mobile, images[`extraMockup${index}`], device);
+          } else {
+            drawSimpleDevice(ctx, images.mobile, device);
           }
         });
       }
@@ -575,117 +647,98 @@ function App() {
           }
         });
       }
-    };
-
-    // Load images
-    if (templateData.devices?.desktop?.enabled && desktopSrc) {
-      desktopImg.onload = checkAndDraw;
-      desktopImg.src = desktopSrc;
-    }
-
-    if ((templateData.devices?.mobile?.enabled || templateData.extraDevices?.length > 0) && mobileSrc) {
-      mobileImg.onload = checkAndDraw;
-      mobileImg.src = mobileSrc;
-    }
-
-    if (totalImages === 0) {
-      renderAll();
-    }
-  };
-
-  const drawDevice = (ctx, img, device) => {
-    ctx.save();
-
-    const mockupEnabled = enableMockups && device.mockup !== false;
-
-    if (mockupEnabled && device.mockupImage) {
-      // Use mockup image overlay
-      drawDeviceWithMockupImage(ctx, img, device);
-    } else {
-      // Draw simple version with just screenshot and border
-      drawSimpleDevice(ctx, img, device);
-    }
-
-    ctx.restore();
-  };
-
-  const drawDeviceWithMockupImage = (ctx, screenshotImg, device) => {
-    // Load and draw mockup image
-    const mockupImg = new Image();
-    mockupImg.crossOrigin = 'anonymous';
-    
-    mockupImg.onload = () => {
-      ctx.save();
-
-      // Draw shadow
-      if (enableShadow && device.shadow) {
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-        ctx.shadowBlur = 40;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 20;
+    } catch (err) {
+      console.error('Error loading images:', err);
+      // Still draw background and text even if images fail
+      drawBackground();
+      if (templateData.elements) {
+        templateData.elements.forEach(element => {
+          if (element.type === 'text') {
+            drawText(ctx, element);
+          }
+        });
       }
+    }
+  };
 
-      // Use mockupConfig from template if available
-      const mockupConfig = device.mockupConfig || {};
-      const mockupX = mockupConfig.x !== undefined ? mockupConfig.x : device.x;
-      const mockupY = mockupConfig.y !== undefined ? mockupConfig.y : device.y;
-      const mockupWidth = mockupConfig.width !== undefined ? mockupConfig.width : device.width;
-      const mockupHeight = mockupConfig.height !== undefined ? mockupConfig.height : device.height;
+  // Synchronous version that takes pre-loaded images
+  const drawDeviceWithMockupImageSync = (ctx, screenshotImg, mockupImg, device) => {
+    // Use mockupConfig from template if available
+    const mockupConfig = device.mockupConfig || {};
+    const mockupX = mockupConfig.x !== undefined ? mockupConfig.x : device.x;
+    const mockupY = mockupConfig.y !== undefined ? mockupConfig.y : device.y;
+    const mockupWidth = mockupConfig.width !== undefined ? mockupConfig.width : device.width;
+    const mockupHeight = mockupConfig.height !== undefined ? mockupConfig.height : device.height;
 
-      // Draw mockup frame image
-      ctx.drawImage(mockupImg, mockupX, mockupY, mockupWidth, mockupHeight);
+    // Use device position for screenshot
+    const screenX = device.x;
+    const screenY = device.y;
+    const screenWidth = device.width;
+    const screenHeight = device.height;
 
-      ctx.restore();
+    console.log('drawDeviceWithMockupImageSync:', { 
+      mockup: { x: mockupX, y: mockupY, w: mockupWidth, h: mockupHeight },
+      screen: { x: screenX, y: screenY, w: screenWidth, h: screenHeight },
+      screenshotSize: { w: screenshotImg.width, h: screenshotImg.height },
+      mockupSize: { w: mockupImg.width, h: mockupImg.height }
+    });
 
-      // Use device position directly for screenshot (simplified)
-      // The device x, y, width, height define where the screenshot appears
-      const screenX = device.x;
-      const screenY = device.y;
-      const screenWidth = device.width;
-      const screenHeight = device.height;
+    // Check if cropping is enabled (default true)
+    const cropEnabled = device.crop !== false;
 
-      // Check if cropping is enabled (default true)
-      const cropEnabled = device.crop !== false;
+    let sx = 0, sy = 0, sw = screenshotImg.width, sh = screenshotImg.height;
 
-      let sx = 0, sy = 0, sw = screenshotImg.width, sh = screenshotImg.height;
-      let dx = screenX, dy = screenY, dw = screenWidth, dh = screenHeight;
+    if (cropEnabled) {
+      // Calculate aspect ratios
+      const imgAspect = screenshotImg.width / screenshotImg.height;
+      const targetAspect = screenWidth / screenHeight;
 
-      if (cropEnabled) {
-        // Calculate aspect ratios
-        const imgAspect = screenshotImg.width / screenshotImg.height;
-        const targetAspect = screenWidth / screenHeight;
-
-        // Crop to fit (cover behavior) - crop from top
-        if (imgAspect > targetAspect) {
-          // Image is wider - crop sides (center)
-          sw = screenshotImg.height * targetAspect;
-          sx = (screenshotImg.width - sw) / 2;
-        } else {
-          // Image is taller - crop from top (no vertical centering)
-          sh = screenshotImg.width / targetAspect;
-          sy = 0; // Crop from top
-        }
+      // Crop to fit (cover behavior) - crop from top
+      if (imgAspect > targetAspect) {
+        // Image is wider - crop sides (center)
+        sw = screenshotImg.height * targetAspect;
+        sx = (screenshotImg.width - sw) / 2;
       } else {
-        // Stretch to fit (old behavior)
-        sx = 0;
-        sy = 0;
-        sw = screenshotImg.width;
-        sh = screenshotImg.height;
+        // Image is taller - crop from top (no vertical centering)
+        sh = screenshotImg.width / targetAspect;
+        sy = 0; // Crop from top
       }
+    }
 
-      // Clip and draw screenshot
+    console.log('Screenshot crop:', { sx, sy, sw, sh });
+
+    // STEP 1: Draw shadow using composite operation
+    if (enableShadow && device.shadow) {
       ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+      ctx.shadowBlur = 40;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 20;
+      // Draw a solid rounded rect that will cast shadow
+      ctx.fillStyle = '#888888';
       ctx.beginPath();
-      roundRect(ctx, screenX, screenY, screenWidth, screenHeight, device.borderRadius * 0.7);
-      ctx.clip();
-      ctx.drawImage(screenshotImg, sx, sy, sw, sh, dx, dy, dw, dh);
+      roundRect(ctx, screenX, screenY, screenWidth, screenHeight, device.borderRadius);
+      ctx.fill();
       ctx.restore();
-    };
+    }
 
-    mockupImg.src = device.mockupImage;
+    // STEP 2: Draw mockup frame (this will cover the shadow-casting rect)
+    ctx.drawImage(mockupImg, mockupX, mockupY, mockupWidth, mockupHeight);
+
+    // STEP 3: Draw the screenshot ON TOP (clipped to screen area)
+    ctx.save();
+    ctx.beginPath();
+    roundRect(ctx, screenX, screenY, screenWidth, screenHeight, device.borderRadius * 0.7);
+    ctx.clip();
+    ctx.drawImage(screenshotImg, sx, sy, sw, sh, screenX, screenY, screenWidth, screenHeight);
+    ctx.restore();
+    
+    console.log('Finished drawing device with mockup');
   };
 
   const drawSimpleDevice = (ctx, img, device) => {
+    ctx.save();
+    
     // Shadow
     if (enableShadow && device.shadow) {
       ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
@@ -810,7 +863,7 @@ function App() {
   };
 
   const resetAll = () => {
-    setCurrentStep(0);
+    setCurrentStep(1);
     setUrl('');
     setUploadedDesktop(null);
     setUploadedMobile(null);
@@ -838,397 +891,19 @@ function App() {
     setExtractedColors([]);
   };
 
+  const goHome = () => {
+    navigate('/');
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* Landing Page */}
-      {currentStep === 0 && (
-        <div className="landing-page">
-          {/* Landing Header */}
-          <header className="bg-white/80 backdrop-blur-md border-b border-gray-100 sticky top-0 z-50">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 sm:gap-3">
-                  <div className='-mr-2 sm:-mr-4'>
-                    <svg className="w-[50px] h-[50px] sm:w-[65px] sm:h-[65px]" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <defs>
-                        <clipPath id="clip_path_landing">
-                          <rect width="100" height="100" rx="16" />
-                        </clipPath>
-                      </defs>
-                      <g clipPath="url(#clip_path_landing)">
-                        <rect width="100" height="100" fill="#FFFFFF" fillRule="evenodd" />
-                        <g transform="translate(20 -5)">
-                          <g transform="translate(1.655 0)">
-                            <path d="M27.5 0L55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0Z" />
-                            <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#5151E3" fillRule="evenodd" />
-                          </g>
-                          <g transform="translate(1.655 42)">
-                            <path d="M27.5 0L55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0Z" />
-                            <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#5151E3" fillRule="evenodd" />
-                          </g>
-                          <rect width="59" height="28" fill="#FFFFFF" fillRule="evenodd" />
-                          <rect width="59" height="28" fill="#FFFFFF" fillRule="evenodd" transform="translate(0 83)" />
-                        </g>
-                      </g>
-                    </svg>
-                  </div>
-                  <div>
-                    <h1 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                      Portfolio Shots
-                    </h1>
-                    <p className="text-[10px] sm:text-xs text-gray-500">by Hexa Devs</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setCurrentStep(1)}
-                  className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2 px-4 sm:px-6 rounded-lg font-semibold hover:shadow-lg transition-all text-sm sm:text-base"
-                >
-                  Get Started
-                </button>
-              </div>
-            </div>
-          </header>
-
-          {/* Hero Section */}
-          <section className="relative overflow-hidden">
-            {/* Background decorations */}
-            <div className="absolute inset-0 overflow-hidden pointer-events-none">
-              <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse"></div>
-              <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse" style={{ animationDelay: '2s' }}></div>
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-cyan-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse" style={{ animationDelay: '4s' }}></div>
-            </div>
-
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-24 lg:py-32 relative">
-              <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
-                {/* Left: Content */}
-                <div className="text-center lg:text-left">
-                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-medium mb-6">
-                    <Sparkles size={16} />
-                    <span>Turn websites into stunning mockups</span>
-                  </div>
-                  
-                  <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 mb-6 leading-tight">
-                    Create Beautiful
-                    <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent"> Portfolio Shots</span>
-                    <br />in Seconds
-                  </h1>
-                  
-                  <p className="text-lg sm:text-xl text-gray-600 mb-8 max-w-xl mx-auto lg:mx-0">
-                    Transform any website URL into professional portfolio mockups with device frames, custom colors, and beautiful gradients. Perfect for designers and developers.
-                  </p>
-                  
-                  <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-                    <button
-                      onClick={() => setCurrentStep(1)}
-                      className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 px-8 rounded-xl font-semibold hover:shadow-xl hover:scale-105 transition-all text-lg flex items-center justify-center gap-2"
-                    >
-                      Start Creating Free
-                      <ArrowRight size={20} />
-                    </button>
-                    <a
-                      href="#how-it-works"
-                      className="bg-white text-gray-700 py-4 px-8 rounded-xl font-semibold hover:shadow-lg transition-all text-lg flex items-center justify-center gap-2 border border-gray-200"
-                    >
-                      <Play size={20} />
-                      See How It Works
-                    </a>
-                  </div>
-
-                  {/* Trust badges */}
-                  <div className="mt-10 flex flex-wrap items-center justify-center lg:justify-start gap-6 text-gray-500 text-sm">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 size={18} className="text-green-500" />
-                      <span>100% Free</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 size={18} className="text-green-500" />
-                      <span>No Sign-up Required</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 size={18} className="text-green-500" />
-                      <span>Instant Download</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right: Hero Image/Demo */}
-                <div className="relative">
-                  <div className="relative bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl p-6 sm:p-8 shadow-2xl">
-                    {/* Mock browser window */}
-                    <div className="bg-white rounded-xl overflow-hidden shadow-lg">
-                      <div className="bg-gray-100 px-4 py-3 flex items-center gap-2">
-                        <div className="flex gap-1.5">
-                          <div className="w-3 h-3 rounded-full bg-red-400"></div>
-                          <div className="w-3 h-3 rounded-full bg-yellow-400"></div>
-                          <div className="w-3 h-3 rounded-full bg-green-400"></div>
-                        </div>
-                        <div className="flex-1 bg-white rounded-md px-3 py-1 text-xs text-gray-500 text-center">
-                          portfolioshots.app
-                        </div>
-                      </div>
-                      <div className="aspect-video bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-8">
-                        <div className="flex items-end gap-4">
-                          {/* Desktop mockup */}
-                          <div className="w-40 sm:w-48 bg-gray-800 rounded-lg p-1 shadow-xl">
-                            <div className="bg-gradient-to-br from-blue-400 to-purple-500 rounded h-24 sm:h-28"></div>
-                          </div>
-                          {/* Mobile mockup */}
-                          <div className="w-12 sm:w-14 bg-gray-800 rounded-xl p-0.5 shadow-xl -mb-2">
-                            <div className="bg-gradient-to-br from-cyan-400 to-blue-500 rounded-lg h-20 sm:h-24"></div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Floating elements */}
-                    <div className="absolute -top-4 -right-4 bg-white rounded-lg px-4 py-2 shadow-lg flex items-center gap-2 text-sm font-medium">
-                      <div className="w-4 h-4 rounded-full bg-gradient-to-r from-pink-500 to-orange-400"></div>
-                      <span>Custom Colors</span>
-                    </div>
-                    <div className="absolute -bottom-4 -left-4 bg-white rounded-lg px-4 py-2 shadow-lg flex items-center gap-2 text-sm font-medium">
-                      <Monitor size={16} className="text-blue-600" />
-                      <span>Device Frames</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Features Section */}
-          <section className="py-16 sm:py-24 bg-white">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6">
-              <div className="text-center mb-12 sm:mb-16">
-                <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
-                  Everything You Need
-                </h2>
-                <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-                  Powerful features to create stunning portfolio mockups without any design skills
-                </p>
-              </div>
-
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                {/* Feature 1 */}
-                <div className="group p-6 sm:p-8 bg-gradient-to-br from-blue-50 to-white rounded-2xl border border-blue-100 hover:shadow-xl transition-all">
-                  <div className="w-14 h-14 bg-blue-600 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                    <Globe className="text-white" size={28} />
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Auto Screenshot</h3>
-                  <p className="text-gray-600">
-                    Just paste your URL and we'll capture beautiful desktop and mobile screenshots automatically.
-                  </p>
-                </div>
-
-                {/* Feature 2 */}
-                <div className="group p-6 sm:p-8 bg-gradient-to-br from-purple-50 to-white rounded-2xl border border-purple-100 hover:shadow-xl transition-all">
-                  <div className="w-14 h-14 bg-purple-600 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                    <Layers className="text-white" size={28} />
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Pro Templates</h3>
-                  <p className="text-gray-600">
-                    Choose from professionally designed templates with various layouts and device combinations.
-                  </p>
-                </div>
-
-                {/* Feature 3 */}
-                <div className="group p-6 sm:p-8 bg-gradient-to-br from-cyan-50 to-white rounded-2xl border border-cyan-100 hover:shadow-xl transition-all">
-                  <div className="w-14 h-14 bg-cyan-600 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                    <Palette className="text-white" size={28} />
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Smart Colors</h3>
-                  <p className="text-gray-600">
-                    We extract colors from your website automatically and suggest matching palettes.
-                  </p>
-                </div>
-
-                {/* Feature 4 */}
-                <div className="group p-6 sm:p-8 bg-gradient-to-br from-pink-50 to-white rounded-2xl border border-pink-100 hover:shadow-xl transition-all">
-                  <div className="w-14 h-14 bg-pink-600 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                    <Sparkles className="text-white" size={28} />
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Gradient Backgrounds</h3>
-                  <p className="text-gray-600">
-                    Add beautiful gradient backgrounds with 8 direction options for that perfect look.
-                  </p>
-                </div>
-
-                {/* Feature 5 */}
-                <div className="group p-6 sm:p-8 bg-gradient-to-br from-orange-50 to-white rounded-2xl border border-orange-100 hover:shadow-xl transition-all">
-                  <div className="w-14 h-14 bg-orange-600 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                    <Monitor className="text-white" size={28} />
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Device Frames</h3>
-                  <p className="text-gray-600">
-                    Add realistic device mockups including desktop monitors and mobile phones.
-                  </p>
-                </div>
-
-                {/* Feature 6 */}
-                <div className="group p-6 sm:p-8 bg-gradient-to-br from-green-50 to-white rounded-2xl border border-green-100 hover:shadow-xl transition-all">
-                  <div className="w-14 h-14 bg-green-600 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                    <Zap className="text-white" size={28} />
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Instant Export</h3>
-                  <p className="text-gray-600">
-                    Download your high-resolution mockup instantly as a PNG file. No watermarks, ever.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* How It Works Section */}
-          <section id="how-it-works" className="py-16 sm:py-24 bg-gradient-to-br from-gray-50 to-white">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6">
-              <div className="text-center mb-12 sm:mb-16">
-                <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
-                  How It Works
-                </h2>
-                <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-                  Create stunning mockups in just three simple steps
-                </p>
-              </div>
-
-              <div className="grid md:grid-cols-3 gap-8 lg:gap-12">
-                {/* Step 1 */}
-                <div className="text-center">
-                  <div className="relative inline-block mb-6">
-                    <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl flex items-center justify-center shadow-lg">
-                      <Link2 className="text-white" size={36} />
-                    </div>
-                    <div className="absolute -top-2 -right-2 w-8 h-8 bg-white rounded-full flex items-center justify-center text-lg font-bold text-blue-600 shadow-md">
-                      1
-                    </div>
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Enter URL</h3>
-                  <p className="text-gray-600">
-                    Paste your website URL or upload your own screenshots. We'll capture both desktop and mobile views.
-                  </p>
-                </div>
-
-                {/* Step 2 */}
-                <div className="text-center">
-                  <div className="relative inline-block mb-6">
-                    <div className="w-20 h-20 bg-gradient-to-br from-purple-600 to-purple-700 rounded-2xl flex items-center justify-center shadow-lg">
-                      <Layers className="text-white" size={36} />
-                    </div>
-                    <div className="absolute -top-2 -right-2 w-8 h-8 bg-white rounded-full flex items-center justify-center text-lg font-bold text-purple-600 shadow-md">
-                      2
-                    </div>
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Pick Template</h3>
-                  <p className="text-gray-600">
-                    Choose from our collection of professionally designed templates with different layouts.
-                  </p>
-                </div>
-
-                {/* Step 3 */}
-                <div className="text-center">
-                  <div className="relative inline-block mb-6">
-                    <div className="w-20 h-20 bg-gradient-to-br from-cyan-600 to-cyan-700 rounded-2xl flex items-center justify-center shadow-lg">
-                      <Download className="text-white" size={36} />
-                    </div>
-                    <div className="absolute -top-2 -right-2 w-8 h-8 bg-white rounded-full flex items-center justify-center text-lg font-bold text-cyan-600 shadow-md">
-                      3
-                    </div>
-                  </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">Customize & Download</h3>
-                  <p className="text-gray-600">
-                    Customize colors, add gradients, edit text, and download your high-res mockup instantly.
-                  </p>
-                </div>
-              </div>
-
-              <div className="text-center mt-12">
-                <button
-                  onClick={() => setCurrentStep(1)}
-                  className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 px-10 rounded-xl font-semibold hover:shadow-xl hover:scale-105 transition-all text-lg inline-flex items-center gap-2"
-                >
-                  Try It Now - It's Free
-                  <ArrowRight size={20} />
-                </button>
-              </div>
-            </div>
-          </section>
-
-          {/* CTA Section */}
-          <section className="py-16 sm:py-24">
-            <div className="max-w-4xl mx-auto px-4 sm:px-6">
-              <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-3xl p-8 sm:p-12 lg:p-16 text-center text-white relative overflow-hidden">
-                {/* Background decoration */}
-                <div className="absolute inset-0 overflow-hidden">
-                  <div className="absolute -top-24 -right-24 w-48 h-48 bg-white rounded-full opacity-10"></div>
-                  <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-white rounded-full opacity-10"></div>
-                </div>
-                
-                <div className="relative">
-                  <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-6">
-                    Ready to Create Your Portfolio Shot?
-                  </h2>
-                  <p className="text-lg sm:text-xl text-blue-100 mb-8 max-w-2xl mx-auto">
-                    Join thousands of designers and developers creating stunning mockups. No sign-up required.
-                  </p>
-                  <button
-                    onClick={() => setCurrentStep(1)}
-                    className="bg-white text-blue-600 py-4 px-10 rounded-xl font-bold hover:shadow-xl hover:scale-105 transition-all text-lg inline-flex items-center gap-2"
-                  >
-                    Get Started Free
-                    <ArrowRight size={20} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Footer */}
-          <footer className="bg-gray-900 text-gray-400 py-12">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6">
-              <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-                <div className="flex items-center gap-3">
-                  <svg className="w-10 h-10" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <defs>
-                      <clipPath id="clip_path_footer">
-                        <rect width="100" height="100" rx="16" />
-                      </clipPath>
-                    </defs>
-                    <g clipPath="url(#clip_path_footer)">
-                      <rect width="100" height="100" fill="#1F2937" fillRule="evenodd" />
-                      <g transform="translate(20 -5)">
-                        <g transform="translate(1.655 0)">
-                          <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#5151E3" fillRule="evenodd" />
-                        </g>
-                        <g transform="translate(1.655 42)">
-                          <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#5151E3" fillRule="evenodd" />
-                        </g>
-                        <rect width="59" height="28" fill="#1F2937" fillRule="evenodd" />
-                        <rect width="59" height="28" fill="#1F2937" fillRule="evenodd" transform="translate(0 83)" />
-                      </g>
-                    </g>
-                  </svg>
-                  <div>
-                    <span className="text-white font-bold">Portfolio Shots</span>
-                    <p className="text-sm">by Hexa Devs</p>
-                  </div>
-                </div>
-                
-                <p className="text-sm text-center md:text-right">
-                  Made with care for designers & developers worldwide.
-                </p>
-              </div>
-            </div>
-          </footer>
-        </div>
-      )}
-
-      {/* App Header - Only show when in app flow */}
-      {currentStep >= 1 && (
-        <>
-          <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
+      {/* App Header */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
         <div className="header-content max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
           <div className="flex flex-col md:flex-row items-center justify-between gap-3 md:gap-0">
             <div 
               className="logo-section flex items-center gap-2 sm:gap-3 cursor-pointer hover:opacity-80 transition-opacity" 
-              onClick={() => setCurrentStep(0)}
+              onClick={goHome}
               title="Back to home"
             >
             <div className='-mr-2 sm:-mr-4'>
@@ -1933,8 +1608,6 @@ function App() {
           </div>
         )}
       </div>
-        </>
-      )}
     </div>
   );
 }
