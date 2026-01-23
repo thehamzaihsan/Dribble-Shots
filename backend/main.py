@@ -23,9 +23,10 @@ browser: Browser = None
 
 # Cache system for screenshots (valid for 1 hour)
 class CacheEntry:
-    def __init__(self, desktop_base64: str, mobile_base64: str):
+    def __init__(self, desktop_base64: str, mobile_base64: str, page_title: str = ""):
         self.desktop_base64 = desktop_base64
         self.mobile_base64 = mobile_base64
+        self.page_title = page_title
         self.timestamp = datetime.now()
     
     def is_expired(self) -> bool:
@@ -49,7 +50,8 @@ def get_from_cache(url: str, scroll_to_bottom: bool) -> Optional[Dict]:
             print(f"✅ Cache hit for {url} (age: {(datetime.now() - entry.timestamp).seconds}s)")
             return {
                 "desktop": entry.desktop_base64,
-                "mobile": entry.mobile_base64
+                "mobile": entry.mobile_base64,
+                "title": entry.page_title
             }
         else:
             # Remove expired entry
@@ -59,10 +61,10 @@ def get_from_cache(url: str, scroll_to_bottom: bool) -> Optional[Dict]:
     print(f"❌ Cache miss for {url}")
     return None
 
-def save_to_cache(url: str, scroll_to_bottom: bool, desktop_base64: str, mobile_base64: str):
+def save_to_cache(url: str, scroll_to_bottom: bool, desktop_base64: str, mobile_base64: str, page_title: str = ""):
     """Save screenshot to cache"""
     cache_key = get_cache_key(url, scroll_to_bottom)
-    screenshot_cache[cache_key] = CacheEntry(desktop_base64, mobile_base64)
+    screenshot_cache[cache_key] = CacheEntry(desktop_base64, mobile_base64, page_title)
     print(f"💾 Cached screenshot for {url} (total cached: {len(screenshot_cache)})")
 
 # Queue system
@@ -283,8 +285,8 @@ async def scroll_to_percentage(page: Page, percentage: float = 0.5):
     # Reduced wait time for stability
     await asyncio.sleep(0.5)  # Reduced from 1.0 to 0.5
 
-async def capture_desktop(url: str, scroll_to_bottom: bool) -> tuple[bytes, str]:
-    """Capture desktop screenshot"""
+async def capture_desktop(url: str, scroll_to_bottom: bool) -> tuple[bytes, str, str]:
+    """Capture desktop screenshot and extract page title"""
     print("🖥️  Creating desktop context...")
     desktop_context = await browser.new_context(
         viewport={"width": 1920, "height": 1080},
@@ -302,6 +304,10 @@ async def capture_desktop(url: str, scroll_to_bottom: bool) -> tuple[bytes, str]
         desktop_page = await desktop_context.new_page()
         print(f"🌐 Navigating to {url} (desktop)...")
         await desktop_page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        
+        # Extract page title
+        page_title = await desktop_page.title()
+        print(f"📝 Page title: {page_title}")
         
         if scroll_to_bottom:
             await scroll_to_percentage(desktop_page, 0.5)  # Scroll to 50%
@@ -323,7 +329,7 @@ async def capture_desktop(url: str, scroll_to_bottom: bool) -> tuple[bytes, str]
         )
         print(f"   ✅ Desktop screenshot captured: {len(desktop_bytes)} bytes")
         
-        return desktop_bytes, base64.b64encode(desktop_bytes).decode('utf-8')
+        return desktop_bytes, base64.b64encode(desktop_bytes).decode('utf-8'), page_title
     finally:
         await desktop_context.close()
 
@@ -450,19 +456,21 @@ async def process_capture(url: str, scroll_to_bottom: bool, use_cache: bool = Tr
             capture_mobile(url, scroll_to_bottom)
         )
         
-        desktop_bytes, desktop_base64 = desktop_result
+        desktop_bytes, desktop_base64, page_title = desktop_result
         mobile_bytes, mobile_base64 = mobile_result
         
         print(f"✅ Success! Desktop: {len(desktop_bytes)} bytes, Mobile: {len(mobile_bytes)} bytes")
+        print(f"📝 Website title: {page_title}")
         
         # Always save to cache (replace existing if any)
-        save_to_cache(url, scroll_to_bottom, desktop_base64, mobile_base64)
+        save_to_cache(url, scroll_to_bottom, desktop_base64, mobile_base64, page_title)
         print(f"💾 Cache updated/replaced for {url}")
         
-        # Return result
+        # Return result with title
         return {
             "desktop": desktop_base64,
-            "mobile": mobile_base64
+            "mobile": mobile_base64,
+            "title": page_title
         }
         
     except Exception as e:

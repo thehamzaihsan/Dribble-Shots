@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { Upload, Link2, Download, Palette, Type, CheckCircle2, ArrowRight, Loader2, RefreshCw } from 'lucide-react';
+import { Upload, Link2, Download, Palette, Type, CheckCircle2, ArrowRight, Loader2, RefreshCw, Sparkles, Zap, Layers, MousePointer, Image, Monitor, Smartphone, Globe, Play } from 'lucide-react';
 import { HexColorPicker } from 'react-colorful';
 import './App.css';
 
 function App() {
-  // Workflow steps
-  const [currentStep, setCurrentStep] = useState(1); // 1: Input, 2: Template, 3: Customize, 4: Done
+  // Workflow steps: 0 = Landing, 1 = Input, 2 = Template, 3 = Customize
+  const [currentStep, setCurrentStep] = useState(0); // 0: Landing, 1: Input, 2: Template, 3: Customize
   
   // Step 1: Input
   const [inputMethod, setInputMethod] = useState('url'); // 'url' or 'upload'
@@ -25,6 +25,7 @@ function App() {
   // Screenshots from backend
   const [desktopSrc, setDesktopSrc] = useState(null);
   const [mobileSrc, setMobileSrc] = useState(null);
+  const [websiteTitle, setWebsiteTitle] = useState('');
   
   // Step 2: Templates
   const [templates, setTemplates] = useState([]);
@@ -33,15 +34,21 @@ function App() {
   
   // Step 3: Customization
   const [bgColor, setBgColor] = useState('#ffffff');
+  const [bgColor2, setBgColor2] = useState('#8b5cf6'); // Second color for gradient
+  const [useGradient, setUseGradient] = useState(false);
+  const [gradientDirection, setGradientDirection] = useState('to bottom right');
   const [textColor, setTextColor] = useState('#000000');
   const [fontFamily, setFontFamily] = useState('Aeonik');
   const [enableShadow, setEnableShadow] = useState(true);
   const [enableMockups, setEnableMockups] = useState(true);
   const [textContents, setTextContents] = useState({});
   const [showBgColorPicker, setShowBgColorPicker] = useState(false);
+  const [showBgColor2Picker, setShowBgColor2Picker] = useState(false);
   const [showTextColorPicker, setShowTextColorPicker] = useState(false);
+  const [extractedColors, setExtractedColors] = useState([]);
   
   const canvasRef = useRef(null);
+  const colorExtractorRef = useRef(null);
   
   const availableFonts = [
     'Aeonik',
@@ -66,7 +73,7 @@ function App() {
     'Monaco'
   ];
   
-  const presetColors = [
+  const defaultPresetColors = [
     { color: '#ffffff', name: 'White' },
     { color: '#fafafa', name: 'Light Gray' },
     { color: '#0f0f17', name: 'Dark' },
@@ -77,10 +84,151 @@ function App() {
     { color: '#10b981', name: 'Green' },
   ];
 
+  const gradientDirections = [
+    { value: 'to right', label: '→' },
+    { value: 'to left', label: '←' },
+    { value: 'to bottom', label: '↓' },
+    { value: 'to top', label: '↑' },
+    { value: 'to bottom right', label: '↘' },
+    { value: 'to bottom left', label: '↙' },
+    { value: 'to top right', label: '↗' },
+    { value: 'to top left', label: '↖' },
+  ];
+
+  // Combine extracted colors with defaults (extracted colors take priority)
+  const presetColors = extractedColors.length > 0 
+    ? [...extractedColors, ...defaultPresetColors.slice(extractedColors.length)]
+    : defaultPresetColors;
+
+  // Extract dominant colors from image
+  const extractColorsFromImage = (imageSrc) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Sample at smaller size for performance
+        const sampleSize = 100;
+        canvas.width = sampleSize;
+        canvas.height = sampleSize;
+        
+        ctx.drawImage(img, 0, 0, sampleSize, sampleSize);
+        const imageData = ctx.getImageData(0, 0, sampleSize, sampleSize);
+        const pixels = imageData.data;
+        
+        // Color quantization using a simple bucketing approach
+        const colorBuckets = {};
+        
+        for (let i = 0; i < pixels.length; i += 4) {
+          const r = Math.round(pixels[i] / 32) * 32;
+          const g = Math.round(pixels[i + 1] / 32) * 32;
+          const b = Math.round(pixels[i + 2] / 32) * 32;
+          
+          // Skip very light colors (close to white) and very dark (close to black)
+          const brightness = (r + g + b) / 3;
+          if (brightness > 240 || brightness < 15) continue;
+          
+          const key = `${r},${g},${b}`;
+          colorBuckets[key] = (colorBuckets[key] || 0) + 1;
+        }
+        
+        // Sort by frequency and get top colors
+        const sortedColors = Object.entries(colorBuckets)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 12);
+        
+        // Convert to hex and filter for diversity
+        const extractedHexColors = [];
+        const minColorDistance = 50; // Minimum distance between colors
+        
+        for (const [colorKey] of sortedColors) {
+          const [r, g, b] = colorKey.split(',').map(Number);
+          const hex = rgbToHex(r, g, b);
+          
+          // Check if this color is different enough from already selected colors
+          const isDifferent = extractedHexColors.every(existing => 
+            colorDistance(hex, existing.color) > minColorDistance
+          );
+          
+          if (isDifferent && extractedHexColors.length < 6) {
+            extractedHexColors.push({ 
+              color: hex, 
+              name: `Extracted ${extractedHexColors.length + 1}` 
+            });
+          }
+        }
+        
+        // Add white and dark as safe defaults if we have room
+        if (extractedHexColors.length < 7) {
+          extractedHexColors.push({ color: '#ffffff', name: 'White' });
+        }
+        if (extractedHexColors.length < 8) {
+          extractedHexColors.push({ color: '#0f0f17', name: 'Dark' });
+        }
+        
+        resolve(extractedHexColors);
+      };
+      img.onerror = () => resolve([]);
+      img.src = imageSrc;
+    });
+  };
+
+  // Helper: RGB to Hex
+  const rgbToHex = (r, g, b) => {
+    return '#' + [r, g, b].map(x => {
+      const hex = Math.min(255, Math.max(0, x)).toString(16);
+      return hex.length === 1 ? '0' + hex : hex;
+    }).join('');
+  };
+
+  // Helper: Calculate color distance
+  const colorDistance = (hex1, hex2) => {
+    const rgb1 = hexToRgb(hex1);
+    const rgb2 = hexToRgb(hex2);
+    return Math.sqrt(
+      Math.pow(rgb1.r - rgb2.r, 2) +
+      Math.pow(rgb1.g - rgb2.g, 2) +
+      Math.pow(rgb1.b - rgb2.b, 2)
+    );
+  };
+
+  // Helper: Hex to RGB
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+      r: parseInt(result[1], 16),
+      g: parseInt(result[2], 16),
+      b: parseInt(result[3], 16)
+    } : { r: 0, g: 0, b: 0 };
+  };
+
   // Load templates on mount
   useEffect(() => {
     loadTemplates();
   }, []);
+
+  // Extract colors when screenshots are loaded
+  useEffect(() => {
+    const extractColors = async () => {
+      if (desktopSrc) {
+        const colors = await extractColorsFromImage(desktopSrc);
+        if (colors.length > 0) {
+          setExtractedColors(colors);
+          // Optionally set the first extracted color as default background
+          // setBgColor(colors[0].color);
+        }
+      } else if (mobileSrc) {
+        const colors = await extractColorsFromImage(mobileSrc);
+        if (colors.length > 0) {
+          setExtractedColors(colors);
+        }
+      }
+    };
+    
+    extractColors();
+  }, [desktopSrc, mobileSrc]);
 
   // Detect when images are loaded
   useEffect(() => {
@@ -95,7 +243,7 @@ function App() {
     if (templateData && (desktopSrc || mobileSrc) && currentStep >= 3) {
       drawCanvas();
     }
-  }, [templateData, desktopSrc, mobileSrc, bgColor, textColor, fontFamily, enableShadow, enableMockups, textContents, currentStep]);
+  }, [templateData, desktopSrc, mobileSrc, bgColor, bgColor2, useGradient, gradientDirection, textColor, fontFamily, enableShadow, enableMockups, textContents, currentStep]);
 
   const loadTemplates = async () => {
     try {
@@ -206,10 +354,14 @@ function App() {
             clearInterval(pollInterval);
             
             setLoadingMessage('Processing screenshots...');
-            setLoadingProgress(70);
-            
-            setDesktopSrc(`data:image/png;base64,${statusData.result.desktop}`);
-            setMobileSrc(`data:image/png;base64,${statusData.result.mobile}`);
+                            setLoadingProgress(70);
+                            
+                            setDesktopSrc(`data:image/png;base64,${statusData.result.desktop}`);
+                            setMobileSrc(`data:image/png;base64,${statusData.result.mobile}`);
+                            // Store website title from backend
+                            if (statusData.result.title) {
+                              setWebsiteTitle(statusData.result.title);
+                            }
             
             setLoadingProgress(100);
             setLoadingMessage('Complete!');
@@ -276,10 +428,19 @@ function App() {
     setEnableShadow(template.devices.desktop.shadow || template.devices.mobile?.shadow || false);
     
     // Initialize text contents from template
+    // Auto-populate title with website title from backend, subtitle with URL
     const initialTexts = {};
     template.elements.forEach(el => {
       if (el.type === 'text') {
-        initialTexts[el.id] = el.content;
+        if (el.id === 'title' && websiteTitle) {
+          // Set title to the extracted website title
+          initialTexts[el.id] = websiteTitle;
+        } else if (el.id === 'subtitle' && url.trim()) {
+          // Set subtitle to the entered URL
+          initialTexts[el.id] = url.trim().startsWith('http') ? url.trim() : `https://${url.trim()}`;
+        } else {
+          initialTexts[el.id] = el.content;
+        }
       }
     });
     setTextContents(initialTexts);
@@ -319,9 +480,52 @@ function App() {
     canvas.width = templateData.canvas.width;
     canvas.height = templateData.canvas.height;
 
-    // Background
-    ctx.fillStyle = bgColor;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Background - solid or gradient
+    const drawBackground = () => {
+      if (useGradient) {
+        // Parse direction to get gradient coordinates
+        let x0 = 0, y0 = 0, x1 = canvas.width, y1 = canvas.height;
+        
+        switch (gradientDirection) {
+          case 'to right':
+            x0 = 0; y0 = 0; x1 = canvas.width; y1 = 0;
+            break;
+          case 'to left':
+            x0 = canvas.width; y0 = 0; x1 = 0; y1 = 0;
+            break;
+          case 'to bottom':
+            x0 = 0; y0 = 0; x1 = 0; y1 = canvas.height;
+            break;
+          case 'to top':
+            x0 = 0; y0 = canvas.height; x1 = 0; y1 = 0;
+            break;
+          case 'to bottom right':
+            x0 = 0; y0 = 0; x1 = canvas.width; y1 = canvas.height;
+            break;
+          case 'to bottom left':
+            x0 = canvas.width; y0 = 0; x1 = 0; y1 = canvas.height;
+            break;
+          case 'to top right':
+            x0 = 0; y0 = canvas.height; x1 = canvas.width; y1 = 0;
+            break;
+          case 'to top left':
+            x0 = canvas.width; y0 = canvas.height; x1 = 0; y1 = 0;
+            break;
+          default:
+            x0 = 0; y0 = 0; x1 = canvas.width; y1 = canvas.height;
+        }
+        
+        const gradient = ctx.createLinearGradient(x0, y0, x1, y1);
+        gradient.addColorStop(0, bgColor);
+        gradient.addColorStop(1, bgColor2);
+        ctx.fillStyle = gradient;
+      } else {
+        ctx.fillStyle = bgColor;
+      }
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    };
+
+    drawBackground();
 
     const desktopImg = new Image();
     const mobileImg = new Image();
@@ -340,8 +544,7 @@ function App() {
 
     const renderAll = () => {
       // Clear and redraw background
-      ctx.fillStyle = bgColor;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      drawBackground();
 
       // Draw desktop device
       if (templateData.devices?.desktop?.enabled && desktopSrc) {
@@ -607,12 +810,13 @@ function App() {
   };
 
   const resetAll = () => {
-    setCurrentStep(1);
+    setCurrentStep(0);
     setUrl('');
     setUploadedDesktop(null);
     setUploadedMobile(null);
     setDesktopSrc(null);
     setMobileSrc(null);
+    setWebsiteTitle('');
     setSelectedTemplate(null);
     setTemplateData(null);
     setScrollToBottom(false);
@@ -623,26 +827,412 @@ function App() {
     setQueuePosition(0);
     setJobId(null);
     setBgColor('#ffffff');
+    setBgColor2('#8b5cf6');
+    setUseGradient(false);
+    setGradientDirection('to bottom right');
     setTextColor('#000000');
     setFontFamily('Aeonik');
     setEnableShadow(true);
     setEnableMockups(true);
     setTextContents({});
+    setExtractedColors([]);
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
+      {/* Landing Page */}
+      {currentStep === 0 && (
+        <div className="landing-page">
+          {/* Landing Header */}
+          <header className="bg-white/80 backdrop-blur-md border-b border-gray-100 sticky top-0 z-50">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 sm:gap-3">
+                  <div className='-mr-2 sm:-mr-4'>
+                    <svg className="w-[50px] h-[50px] sm:w-[65px] sm:h-[65px]" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <defs>
+                        <clipPath id="clip_path_landing">
+                          <rect width="100" height="100" rx="16" />
+                        </clipPath>
+                      </defs>
+                      <g clipPath="url(#clip_path_landing)">
+                        <rect width="100" height="100" fill="#FFFFFF" fillRule="evenodd" />
+                        <g transform="translate(20 -5)">
+                          <g transform="translate(1.655 0)">
+                            <path d="M27.5 0L55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0Z" />
+                            <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#5151E3" fillRule="evenodd" />
+                          </g>
+                          <g transform="translate(1.655 42)">
+                            <path d="M27.5 0L55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0Z" />
+                            <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#5151E3" fillRule="evenodd" />
+                          </g>
+                          <rect width="59" height="28" fill="#FFFFFF" fillRule="evenodd" />
+                          <rect width="59" height="28" fill="#FFFFFF" fillRule="evenodd" transform="translate(0 83)" />
+                        </g>
+                      </g>
+                    </svg>
+                  </div>
+                  <div>
+                    <h1 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                      Portfolio Shots
+                    </h1>
+                    <p className="text-[10px] sm:text-xs text-gray-500">by Hexa Devs</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setCurrentStep(1)}
+                  className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2 px-4 sm:px-6 rounded-lg font-semibold hover:shadow-lg transition-all text-sm sm:text-base"
+                >
+                  Get Started
+                </button>
+              </div>
+            </div>
+          </header>
+
+          {/* Hero Section */}
+          <section className="relative overflow-hidden">
+            {/* Background decorations */}
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+              <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse"></div>
+              <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse" style={{ animationDelay: '2s' }}></div>
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-cyan-200 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse" style={{ animationDelay: '4s' }}></div>
+            </div>
+
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-16 sm:py-24 lg:py-32 relative">
+              <div className="grid lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+                {/* Left: Content */}
+                <div className="text-center lg:text-left">
+                  <div className="inline-flex items-center gap-2 px-4 py-2 bg-blue-100 text-blue-700 rounded-full text-sm font-medium mb-6">
+                    <Sparkles size={16} />
+                    <span>Turn websites into stunning mockups</span>
+                  </div>
+                  
+                  <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 mb-6 leading-tight">
+                    Create Beautiful
+                    <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent"> Portfolio Shots</span>
+                    <br />in Seconds
+                  </h1>
+                  
+                  <p className="text-lg sm:text-xl text-gray-600 mb-8 max-w-xl mx-auto lg:mx-0">
+                    Transform any website URL into professional portfolio mockups with device frames, custom colors, and beautiful gradients. Perfect for designers and developers.
+                  </p>
+                  
+                  <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
+                    <button
+                      onClick={() => setCurrentStep(1)}
+                      className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 px-8 rounded-xl font-semibold hover:shadow-xl hover:scale-105 transition-all text-lg flex items-center justify-center gap-2"
+                    >
+                      Start Creating Free
+                      <ArrowRight size={20} />
+                    </button>
+                    <a
+                      href="#how-it-works"
+                      className="bg-white text-gray-700 py-4 px-8 rounded-xl font-semibold hover:shadow-lg transition-all text-lg flex items-center justify-center gap-2 border border-gray-200"
+                    >
+                      <Play size={20} />
+                      See How It Works
+                    </a>
+                  </div>
+
+                  {/* Trust badges */}
+                  <div className="mt-10 flex flex-wrap items-center justify-center lg:justify-start gap-6 text-gray-500 text-sm">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 size={18} className="text-green-500" />
+                      <span>100% Free</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 size={18} className="text-green-500" />
+                      <span>No Sign-up Required</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 size={18} className="text-green-500" />
+                      <span>Instant Download</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right: Hero Image/Demo */}
+                <div className="relative">
+                  <div className="relative bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl p-6 sm:p-8 shadow-2xl">
+                    {/* Mock browser window */}
+                    <div className="bg-white rounded-xl overflow-hidden shadow-lg">
+                      <div className="bg-gray-100 px-4 py-3 flex items-center gap-2">
+                        <div className="flex gap-1.5">
+                          <div className="w-3 h-3 rounded-full bg-red-400"></div>
+                          <div className="w-3 h-3 rounded-full bg-yellow-400"></div>
+                          <div className="w-3 h-3 rounded-full bg-green-400"></div>
+                        </div>
+                        <div className="flex-1 bg-white rounded-md px-3 py-1 text-xs text-gray-500 text-center">
+                          portfolioshots.app
+                        </div>
+                      </div>
+                      <div className="aspect-video bg-gradient-to-br from-gray-50 to-gray-100 flex items-center justify-center p-8">
+                        <div className="flex items-end gap-4">
+                          {/* Desktop mockup */}
+                          <div className="w-40 sm:w-48 bg-gray-800 rounded-lg p-1 shadow-xl">
+                            <div className="bg-gradient-to-br from-blue-400 to-purple-500 rounded h-24 sm:h-28"></div>
+                          </div>
+                          {/* Mobile mockup */}
+                          <div className="w-12 sm:w-14 bg-gray-800 rounded-xl p-0.5 shadow-xl -mb-2">
+                            <div className="bg-gradient-to-br from-cyan-400 to-blue-500 rounded-lg h-20 sm:h-24"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {/* Floating elements */}
+                    <div className="absolute -top-4 -right-4 bg-white rounded-lg px-4 py-2 shadow-lg flex items-center gap-2 text-sm font-medium">
+                      <div className="w-4 h-4 rounded-full bg-gradient-to-r from-pink-500 to-orange-400"></div>
+                      <span>Custom Colors</span>
+                    </div>
+                    <div className="absolute -bottom-4 -left-4 bg-white rounded-lg px-4 py-2 shadow-lg flex items-center gap-2 text-sm font-medium">
+                      <Monitor size={16} className="text-blue-600" />
+                      <span>Device Frames</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Features Section */}
+          <section className="py-16 sm:py-24 bg-white">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6">
+              <div className="text-center mb-12 sm:mb-16">
+                <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
+                  Everything You Need
+                </h2>
+                <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+                  Powerful features to create stunning portfolio mockups without any design skills
+                </p>
+              </div>
+
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                {/* Feature 1 */}
+                <div className="group p-6 sm:p-8 bg-gradient-to-br from-blue-50 to-white rounded-2xl border border-blue-100 hover:shadow-xl transition-all">
+                  <div className="w-14 h-14 bg-blue-600 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                    <Globe className="text-white" size={28} />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-3">Auto Screenshot</h3>
+                  <p className="text-gray-600">
+                    Just paste your URL and we'll capture beautiful desktop and mobile screenshots automatically.
+                  </p>
+                </div>
+
+                {/* Feature 2 */}
+                <div className="group p-6 sm:p-8 bg-gradient-to-br from-purple-50 to-white rounded-2xl border border-purple-100 hover:shadow-xl transition-all">
+                  <div className="w-14 h-14 bg-purple-600 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                    <Layers className="text-white" size={28} />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-3">Pro Templates</h3>
+                  <p className="text-gray-600">
+                    Choose from professionally designed templates with various layouts and device combinations.
+                  </p>
+                </div>
+
+                {/* Feature 3 */}
+                <div className="group p-6 sm:p-8 bg-gradient-to-br from-cyan-50 to-white rounded-2xl border border-cyan-100 hover:shadow-xl transition-all">
+                  <div className="w-14 h-14 bg-cyan-600 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                    <Palette className="text-white" size={28} />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-3">Smart Colors</h3>
+                  <p className="text-gray-600">
+                    We extract colors from your website automatically and suggest matching palettes.
+                  </p>
+                </div>
+
+                {/* Feature 4 */}
+                <div className="group p-6 sm:p-8 bg-gradient-to-br from-pink-50 to-white rounded-2xl border border-pink-100 hover:shadow-xl transition-all">
+                  <div className="w-14 h-14 bg-pink-600 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                    <Sparkles className="text-white" size={28} />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-3">Gradient Backgrounds</h3>
+                  <p className="text-gray-600">
+                    Add beautiful gradient backgrounds with 8 direction options for that perfect look.
+                  </p>
+                </div>
+
+                {/* Feature 5 */}
+                <div className="group p-6 sm:p-8 bg-gradient-to-br from-orange-50 to-white rounded-2xl border border-orange-100 hover:shadow-xl transition-all">
+                  <div className="w-14 h-14 bg-orange-600 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                    <Monitor className="text-white" size={28} />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-3">Device Frames</h3>
+                  <p className="text-gray-600">
+                    Add realistic device mockups including desktop monitors and mobile phones.
+                  </p>
+                </div>
+
+                {/* Feature 6 */}
+                <div className="group p-6 sm:p-8 bg-gradient-to-br from-green-50 to-white rounded-2xl border border-green-100 hover:shadow-xl transition-all">
+                  <div className="w-14 h-14 bg-green-600 rounded-xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+                    <Zap className="text-white" size={28} />
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-3">Instant Export</h3>
+                  <p className="text-gray-600">
+                    Download your high-resolution mockup instantly as a PNG file. No watermarks, ever.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* How It Works Section */}
+          <section id="how-it-works" className="py-16 sm:py-24 bg-gradient-to-br from-gray-50 to-white">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6">
+              <div className="text-center mb-12 sm:mb-16">
+                <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
+                  How It Works
+                </h2>
+                <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+                  Create stunning mockups in just three simple steps
+                </p>
+              </div>
+
+              <div className="grid md:grid-cols-3 gap-8 lg:gap-12">
+                {/* Step 1 */}
+                <div className="text-center">
+                  <div className="relative inline-block mb-6">
+                    <div className="w-20 h-20 bg-gradient-to-br from-blue-600 to-blue-700 rounded-2xl flex items-center justify-center shadow-lg">
+                      <Link2 className="text-white" size={36} />
+                    </div>
+                    <div className="absolute -top-2 -right-2 w-8 h-8 bg-white rounded-full flex items-center justify-center text-lg font-bold text-blue-600 shadow-md">
+                      1
+                    </div>
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-3">Enter URL</h3>
+                  <p className="text-gray-600">
+                    Paste your website URL or upload your own screenshots. We'll capture both desktop and mobile views.
+                  </p>
+                </div>
+
+                {/* Step 2 */}
+                <div className="text-center">
+                  <div className="relative inline-block mb-6">
+                    <div className="w-20 h-20 bg-gradient-to-br from-purple-600 to-purple-700 rounded-2xl flex items-center justify-center shadow-lg">
+                      <Layers className="text-white" size={36} />
+                    </div>
+                    <div className="absolute -top-2 -right-2 w-8 h-8 bg-white rounded-full flex items-center justify-center text-lg font-bold text-purple-600 shadow-md">
+                      2
+                    </div>
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-3">Pick Template</h3>
+                  <p className="text-gray-600">
+                    Choose from our collection of professionally designed templates with different layouts.
+                  </p>
+                </div>
+
+                {/* Step 3 */}
+                <div className="text-center">
+                  <div className="relative inline-block mb-6">
+                    <div className="w-20 h-20 bg-gradient-to-br from-cyan-600 to-cyan-700 rounded-2xl flex items-center justify-center shadow-lg">
+                      <Download className="text-white" size={36} />
+                    </div>
+                    <div className="absolute -top-2 -right-2 w-8 h-8 bg-white rounded-full flex items-center justify-center text-lg font-bold text-cyan-600 shadow-md">
+                      3
+                    </div>
+                  </div>
+                  <h3 className="text-xl font-bold text-gray-900 mb-3">Customize & Download</h3>
+                  <p className="text-gray-600">
+                    Customize colors, add gradients, edit text, and download your high-res mockup instantly.
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-center mt-12">
+                <button
+                  onClick={() => setCurrentStep(1)}
+                  className="bg-gradient-to-r from-blue-600 to-purple-600 text-white py-4 px-10 rounded-xl font-semibold hover:shadow-xl hover:scale-105 transition-all text-lg inline-flex items-center gap-2"
+                >
+                  Try It Now - It's Free
+                  <ArrowRight size={20} />
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* CTA Section */}
+          <section className="py-16 sm:py-24">
+            <div className="max-w-4xl mx-auto px-4 sm:px-6">
+              <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-3xl p-8 sm:p-12 lg:p-16 text-center text-white relative overflow-hidden">
+                {/* Background decoration */}
+                <div className="absolute inset-0 overflow-hidden">
+                  <div className="absolute -top-24 -right-24 w-48 h-48 bg-white rounded-full opacity-10"></div>
+                  <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-white rounded-full opacity-10"></div>
+                </div>
+                
+                <div className="relative">
+                  <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold mb-6">
+                    Ready to Create Your Portfolio Shot?
+                  </h2>
+                  <p className="text-lg sm:text-xl text-blue-100 mb-8 max-w-2xl mx-auto">
+                    Join thousands of designers and developers creating stunning mockups. No sign-up required.
+                  </p>
+                  <button
+                    onClick={() => setCurrentStep(1)}
+                    className="bg-white text-blue-600 py-4 px-10 rounded-xl font-bold hover:shadow-xl hover:scale-105 transition-all text-lg inline-flex items-center gap-2"
+                  >
+                    Get Started Free
+                    <ArrowRight size={20} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* Footer */}
+          <footer className="bg-gray-900 text-gray-400 py-12">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="flex items-center gap-3">
+                  <svg className="w-10 h-10" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                      <clipPath id="clip_path_footer">
+                        <rect width="100" height="100" rx="16" />
+                      </clipPath>
+                    </defs>
+                    <g clipPath="url(#clip_path_footer)">
+                      <rect width="100" height="100" fill="#1F2937" fillRule="evenodd" />
+                      <g transform="translate(20 -5)">
+                        <g transform="translate(1.655 0)">
+                          <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#5151E3" fillRule="evenodd" />
+                        </g>
+                        <g transform="translate(1.655 42)">
+                          <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#5151E3" fillRule="evenodd" />
+                        </g>
+                        <rect width="59" height="28" fill="#1F2937" fillRule="evenodd" />
+                        <rect width="59" height="28" fill="#1F2937" fillRule="evenodd" transform="translate(0 83)" />
+                      </g>
+                    </g>
+                  </svg>
+                  <div>
+                    <span className="text-white font-bold">Portfolio Shots</span>
+                    <p className="text-sm">by Hexa Devs</p>
+                  </div>
+                </div>
+                
+                <p className="text-sm text-center md:text-right">
+                  Made with care for designers & developers worldwide.
+                </p>
+              </div>
+            </div>
+          </footer>
+        </div>
+      )}
+
+      {/* App Header - Only show when in app flow */}
+      {currentStep >= 1 && (
+        <>
+          <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
+        <div className="header-content max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-3 md:gap-0">
             <div 
-              className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity" 
-              onClick={() => setCurrentStep(1)}
-              title="Back to start"
+              className="logo-section flex items-center gap-2 sm:gap-3 cursor-pointer hover:opacity-80 transition-opacity" 
+              onClick={() => setCurrentStep(0)}
+              title="Back to home"
             >
-            <div className='-mr-4'>
-              <svg width="75" height="75" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <div className='-mr-2 sm:-mr-4'>
+              <svg className="w-[50px] h-[50px] sm:w-[75px] sm:h-[75px]" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <defs>
                   <clipPath id="clip_path_1">
                     <rect width="100" height="100" rx="16" />
@@ -670,32 +1260,32 @@ function App() {
               </svg>
             </div>
               <div>
-                <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                <h1 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
                   Portfolio Shots
                 </h1>
-                <p className="text-xs text-gray-500">Create beautiful mockups in seconds by Hexa Devs</p>
+                <p className="text-[10px] sm:text-xs text-gray-500">Create beautiful mockups in seconds by Hexa Devs</p>
               </div>
             </div>
             
             {/* Progress Steps */}
-            <div className="flex items-center gap-4">
+            <div className="progress-steps flex items-center gap-2 sm:gap-4">
               {[
                 { num: 1, label: 'Input' },
                 { num: 2, label: 'Template' },
                 { num: 3, label: 'Customize' }
               ].map(({ num, label }) => (
-                <div key={num} className="flex items-center gap-2">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-all ${
+                <div key={num} className="flex items-center gap-1 sm:gap-2">
+                  <div className={`step-circle w-6 h-6 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold transition-all ${
                     currentStep >= num 
                       ? 'bg-blue-600 text-white' 
                       : 'bg-gray-200 text-gray-400'
                   }`}>
-                    {currentStep > num ? <CheckCircle2 size={16} /> : num}
+                    {currentStep > num ? <CheckCircle2 size={14} className="sm:w-4 sm:h-4" /> : num}
                   </div>
-                  <span className={`text-sm font-medium ${
+                  <span className={`step-label text-xs sm:text-sm font-medium hidden xs:inline ${
                     currentStep >= num ? 'text-gray-900' : 'text-gray-400'
                   }`}>{label}</span>
-                  {num < 3 && <ArrowRight size={16} className="text-gray-300" />}
+                  {num < 3 && <ArrowRight size={14} className="step-arrow text-gray-300 hidden sm:inline" />}
                 </div>
               ))}
             </div>
@@ -703,48 +1293,48 @@ function App() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="main-container max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
         {/* Step 1: Input */}
         {currentStep === 1 && (
           <div className="max-w-2xl mx-auto">
-            <div className="text-center mb-8">
-              <h2 className="text-3xl font-bold text-gray-900 mb-2">Let's Get Started</h2>
-              <p className="text-gray-600">Provide your website URL or upload screenshots</p>
+            <div className="text-center mb-6 sm:mb-8">
+              <h2 className="step-title text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Let's Get Started</h2>
+              <p className="step-subtitle text-sm sm:text-base text-gray-600">Provide your website URL or upload screenshots</p>
             </div>
 
             {/* Input Method Selector */}
-            <div className="flex gap-4 mb-6">
+            <div className="input-method-selector flex flex-col sm:flex-row gap-3 sm:gap-4 mb-6">
               <button
                 onClick={() => setInputMethod('url')}
-                className={`flex-1 py-4 px-6 rounded-xl border-2 transition-all ${
+                className={`input-method-btn flex-1 py-3 sm:py-4 px-4 sm:px-6 rounded-xl border-2 transition-all ${
                   inputMethod === 'url'
                     ? 'border-blue-600 bg-blue-50'
                     : 'border-gray-200 hover:border-gray-300'
                 }`}
               >
-                <Link2 className={`mx-auto mb-2 ${inputMethod === 'url' ? 'text-blue-600' : 'text-gray-400'}`} size={24} />
-                <div className="font-semibold text-gray-900">Website URL</div>
-                <div className="text-sm text-gray-500">Auto-capture screenshots</div>
+                <Link2 className={`mx-auto mb-2 ${inputMethod === 'url' ? 'text-blue-600' : 'text-gray-400'}`} size={20} />
+                <div className="font-semibold text-gray-900 text-sm sm:text-base">Website URL</div>
+                <div className="text-xs sm:text-sm text-gray-500">Auto-capture screenshots</div>
               </button>
               
               <button
                 onClick={() => setInputMethod('upload')}
-                className={`flex-1 py-4 px-6 rounded-xl border-2 transition-all ${
+                className={`input-method-btn flex-1 py-3 sm:py-4 px-4 sm:px-6 rounded-xl border-2 transition-all ${
                   inputMethod === 'upload'
                     ? 'border-blue-600 bg-blue-50'
                     : 'border-gray-200 hover:border-gray-300'
                 }`}
               >
-                <Upload className={`mx-auto mb-2 ${inputMethod === 'upload' ? 'text-blue-600' : 'text-gray-400'}`} size={24} />
-                <div className="font-semibold text-gray-900">Upload Files</div>
-                <div className="text-sm text-gray-500">Use your own screenshots</div>
+                <Upload className={`mx-auto mb-2 ${inputMethod === 'upload' ? 'text-blue-600' : 'text-gray-400'}`} size={20} />
+                <div className="font-semibold text-gray-900 text-sm sm:text-base">Upload Files</div>
+                <div className="text-xs sm:text-sm text-gray-500">Use your own screenshots</div>
               </button>
             </div>
 
             {/* URL Input */}
             {inputMethod === 'url' && (
-              <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-200">
-                <label className="block text-sm font-medium text-gray-700 mb-3">
+              <div className="bg-white rounded-2xl p-4 sm:p-8 shadow-lg border border-gray-200">
+                <label className="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">
                   Website URL
                 </label>
                 <input
@@ -752,10 +1342,10 @@ function App() {
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://example.com"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="form-input w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
                 />
 
-                <div className="mt-4 space-y-3">
+                <div className="mt-3 sm:mt-4 space-y-2 sm:space-y-3">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -763,7 +1353,7 @@ function App() {
                       onChange={(e) => setScrollToBottom(e.target.checked)}
                       className="w-4 h-4 text-blue-600 rounded"
                     />
-                    <span className="text-sm text-gray-700">Scroll to bottom before capturing</span>
+                    <span className="text-xs sm:text-sm text-gray-700">Scroll to bottom before capturing</span>
                   </label>
                   
                   <label className="flex items-center gap-2 cursor-pointer">
@@ -773,36 +1363,36 @@ function App() {
                       onChange={(e) => setUseCache(e.target.checked)}
                       className="w-4 h-4 text-blue-600 rounded"
                     />
-                    <span className="text-sm text-gray-700">
+                    <span className="text-xs sm:text-sm text-gray-700">
                       Use cached screenshots (faster, valid for 1 hour)
                     </span>
                   </label>
                 </div>
 
                 {error && (
-                  <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                  <div className="mt-3 sm:mt-4 p-2.5 sm:p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs sm:text-sm">
                     {error}
                   </div>
                 )}
 
                 {/* Progress Bar */}
                 {loading && (
-                  <div className="mt-4">
-                    <div className="mb-2 flex items-center justify-between text-sm">
+                  <div className="loading-container mt-3 sm:mt-4">
+                    <div className="mb-2 flex items-center justify-between text-xs sm:text-sm">
                       <span className="text-gray-600">{loadingMessage}</span>
                       <span className="font-semibold text-blue-600">{Math.round(loadingProgress)}%</span>
                     </div>
                     {queuePosition > 0 && (
-                      <div className="mb-2 text-sm text-center">
-                        <span className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full font-medium">
+                      <div className="mb-2 text-xs sm:text-sm text-center">
+                        <span className="queue-position-badge inline-flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1 bg-blue-50 text-blue-700 rounded-full font-medium">
                           <span>Queue Position:</span>
-                          <span className="text-lg font-bold">{queuePosition}</span>
+                          <span className="text-base sm:text-lg font-bold">{queuePosition}</span>
                         </span>
                       </div>
                     )}
-                    <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                    <div className="w-full bg-gray-200 rounded-full h-2.5 sm:h-3 overflow-hidden">
                       <div 
-                        className="bg-gradient-to-r from-blue-600 to-purple-600 h-3 rounded-full transition-all duration-500 ease-out"
+                        className="bg-gradient-to-r from-blue-600 to-purple-600 h-2.5 sm:h-3 rounded-full transition-all duration-500 ease-out"
                         style={{ width: `${loadingProgress}%` }}
                       />
                     </div>
@@ -812,17 +1402,18 @@ function App() {
                 <button
                   onClick={handleFetchScreenshots}
                   disabled={loading}
-                  className="w-full mt-6 bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="action-btn w-full mt-4 sm:mt-6 bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2 text-sm sm:text-base"
                 >
                   {loading ? (
                     <>
-                      <Loader2 className="animate-spin" size={20} />
-                      Capturing Screenshots...
+                      <Loader2 className="animate-spin" size={18} />
+                      <span className="hidden xs:inline">Capturing Screenshots...</span>
+                      <span className="xs:hidden">Capturing...</span>
                     </>
                   ) : (
                     <>
                       Continue
-                      <ArrowRight size={20} />
+                      <ArrowRight size={18} />
                     </>
                   )}
                 </button>
@@ -831,54 +1422,54 @@ function App() {
 
             {/* File Upload */}
             {inputMethod === 'upload' && (
-              <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-200">
-                <div className="space-y-6">
+              <div className="bg-white rounded-2xl p-4 sm:p-8 shadow-lg border border-gray-200">
+                <div className="space-y-4 sm:space-y-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">
                       Desktop Screenshot
                     </label>
                     <input
                       type="file"
                       accept="image/*"
                       onChange={(e) => handleFileUpload(e, 'desktop')}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                      className="form-input w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg text-sm"
                     />
                     {desktopSrc && (
-                      <div className="mt-3">
-                        <img src={desktopSrc} alt="Desktop preview" className="max-w-full h-32 object-cover rounded-lg border border-gray-200" />
+                      <div className="mt-2 sm:mt-3">
+                        <img src={desktopSrc} alt="Desktop preview" className="upload-preview max-w-full h-24 sm:h-32 object-cover rounded-lg border border-gray-200" />
                       </div>
                     )}
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                    <label className="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">
                       Mobile Screenshot (Optional)
                     </label>
                     <input
                       type="file"
                       accept="image/*"
                       onChange={(e) => handleFileUpload(e, 'mobile')}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg"
+                      className="form-input w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg text-sm"
                     />
                     {mobileSrc && (
-                      <div className="mt-3">
-                        <img src={mobileSrc} alt="Mobile preview" className="max-w-full h-32 object-cover rounded-lg border border-gray-200" />
+                      <div className="mt-2 sm:mt-3">
+                        <img src={mobileSrc} alt="Mobile preview" className="upload-preview max-w-full h-24 sm:h-32 object-cover rounded-lg border border-gray-200" />
                       </div>
                     )}
                   </div>
 
                   {error && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                    <div className="p-2.5 sm:p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs sm:text-sm">
                       {error}
                     </div>
                   )}
 
                   <button
                     onClick={handleUploadComplete}
-                    className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:shadow-lg transition-all flex items-center justify-center gap-2"
+                    className="action-btn w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg font-semibold hover:shadow-lg transition-all flex items-center justify-center gap-2 text-sm sm:text-base"
                   >
                     Continue
-                    <ArrowRight size={20} />
+                    <ArrowRight size={18} />
                   </button>
                 </div>
               </div>
@@ -889,33 +1480,33 @@ function App() {
         {/* Step 2: Template Selection */}
         {currentStep === 2 && (
           <div>
-            <div className="text-center mb-8">
-              <h2 className="text-3xl font-bold text-gray-900 mb-2">Choose a Template</h2>
-              <p className="text-gray-600">Select a layout that best fits your needs</p>
+            <div className="text-center mb-6 sm:mb-8">
+              <h2 className="step-title text-2xl sm:text-3xl font-bold text-gray-900 mb-2">Choose a Template</h2>
+              <p className="step-subtitle text-sm sm:text-base text-gray-600">Select a layout that best fits your needs</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="template-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
               {templates.map((template) => (
                 <button
                   key={template.id}
                   onClick={() => handleTemplateSelect(template)}
-                  className="bg-white rounded-2xl p-6 shadow-lg border-2 border-gray-200 hover:border-blue-600 transition-all text-left group"
+                  className="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-lg border-2 border-gray-200 hover:border-blue-600 transition-all text-left group"
                 >
-                  <div className="aspect-video bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg mb-4 flex items-center justify-center relative overflow-hidden">
+                  <div className="aspect-video bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg mb-3 sm:mb-4 flex items-center justify-center relative overflow-hidden">
                     <div className="absolute inset-0 flex items-center justify-center">
                       {template.devices.desktop.enabled && (
-                        <div className="w-16 h-10 bg-white rounded shadow-lg mr-2" />
+                        <div className="w-12 sm:w-16 h-8 sm:h-10 bg-white rounded shadow-lg mr-2" />
                       )}
                       {template.devices.mobile?.enabled && (
-                        <div className="w-6 h-12 bg-white rounded-lg shadow-lg" />
+                        <div className="w-4 sm:w-6 h-10 sm:h-12 bg-white rounded-lg shadow-lg" />
                       )}
                     </div>
                   </div>
-                  <h3 className="font-bold text-lg text-gray-900 mb-1">{template.name}</h3>
-                  <p className="text-sm text-gray-600">{template.description}</p>
-                  <div className="mt-4 text-blue-600 font-semibold text-sm flex items-center gap-2 group-hover:gap-3 transition-all">
+                  <h3 className="font-bold text-base sm:text-lg text-gray-900 mb-1">{template.name}</h3>
+                  <p className="text-xs sm:text-sm text-gray-600">{template.description}</p>
+                  <div className="mt-3 sm:mt-4 text-blue-600 font-semibold text-xs sm:text-sm flex items-center gap-1 sm:gap-2 group-hover:gap-2 sm:group-hover:gap-3 transition-all">
                     Select Template
-                    <ArrowRight size={16} />
+                    <ArrowRight size={14} />
                   </div>
                 </button>
               ))}
@@ -925,12 +1516,12 @@ function App() {
 
         {/* Step 3: Customize */}
         {currentStep === 3 && templateData && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="customize-layout grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-8">
             {/* Show skeleton if images are still loading */}
             {(!desktopSrc && !mobileSrc) || imagesLoading ? (
               <>
-                {/* Skeleton Customization Panel */}
-                <div className="lg:col-span-1 space-y-6">
+                {/* Skeleton Customization Panel - Hidden on mobile */}
+                <div className="skeleton-panel lg:col-span-1 space-y-6 hidden lg:block">
                   <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-200">
                     <div className="h-6 bg-gray-200 rounded w-32 mb-4 animate-pulse" />
                     
@@ -993,14 +1584,14 @@ function App() {
                 </div>
 
                 {/* Skeleton Preview */}
-                <div className="lg:col-span-2">
-                  <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-200 sticky top-24">
-                    <div className="h-6 bg-gray-200 rounded w-24 mb-4 animate-pulse" />
+                <div className="customize-preview lg:col-span-2 order-first lg:order-none">
+                  <div className="preview-container bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-lg border border-gray-200 lg:sticky lg:top-24">
+                    <div className="h-5 sm:h-6 bg-gray-200 rounded w-24 mb-3 sm:mb-4 animate-pulse" />
                     <div className="aspect-video bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg flex items-center justify-center">
                       <div className="text-center">
-                        <Loader2 className="animate-spin mx-auto mb-3 text-blue-600" size={48} />
-                        <p className="text-gray-600 font-medium">Loading your screenshots...</p>
-                        <p className="text-sm text-gray-500 mt-1">This may take a moment</p>
+                        <Loader2 className="animate-spin mx-auto mb-2 sm:mb-3 text-blue-600" size={36} />
+                        <p className="text-gray-600 font-medium text-sm sm:text-base">Loading your screenshots...</p>
+                        <p className="text-xs sm:text-sm text-gray-500 mt-1">This may take a moment</p>
                       </div>
                     </div>
                   </div>
@@ -1009,28 +1600,57 @@ function App() {
             ) : (
               <>
                 {/* Actual Customization Panel - Scrollable */}
-                <div className="lg:col-span-1">
-                  <div className="lg:sticky lg:top-24 h-[calc(100vh-120px)] overflow-y-auto pr-2">
-                    <div className="space-y-6">
-                  <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-200">
-                    <h3 className="font-bold text-lg mb-4">Customize</h3>
+                <div className="customize-controls lg:col-span-1 order-last lg:order-none">
+                  <div className="lg:sticky lg:top-24 lg:h-[calc(100vh-120px)] lg:overflow-y-auto lg:pr-2">
+                    <div className="space-y-4 sm:space-y-6">
+                  <div className="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-lg border border-gray-200">
+                    <h3 className="font-bold text-base sm:text-lg mb-3 sm:mb-4">Customize</h3>
 
-                {/* Background Color */}
-                <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Background Color</label>
-                  <div className="relative">
+                {/* Background Type Toggle */}
+                <div className="mb-4 sm:mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Background</label>
+                  <div className="flex gap-2 mb-3">
+                    <button
+                      onClick={() => setUseGradient(false)}
+                      className={`flex-1 py-2 px-3 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                        !useGradient 
+                          ? 'bg-blue-600 text-white' 
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      Solid
+                    </button>
+                    <button
+                      onClick={() => setUseGradient(true)}
+                      className={`flex-1 py-2 px-3 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                        useGradient 
+                          ? 'bg-blue-600 text-white' 
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
+                    >
+                      Gradient
+                    </button>
+                  </div>
+
+                  {/* Color Preview */}
+                  <div className="relative mb-3">
                     <div 
-                      className="w-full h-12 rounded-lg cursor-pointer border-2 border-gray-300 hover:border-blue-500 transition-all"
-                      style={{ backgroundColor: bgColor }}
+                      className="w-full h-10 sm:h-12 rounded-lg cursor-pointer border-2 border-gray-300 hover:border-blue-500 transition-all"
+                      style={{ 
+                        background: useGradient 
+                          ? `linear-gradient(${gradientDirection}, ${bgColor}, ${bgColor2})`
+                          : bgColor 
+                      }}
                       onClick={() => setShowBgColorPicker(!showBgColorPicker)}
                     />
                     {showBgColorPicker && (
-                      <div className="absolute z-20 mt-2">
+                      <div className="color-picker-popup absolute z-20 mt-2 left-0 sm:left-auto">
                         <div 
                           className="fixed inset-0" 
                           onClick={() => setShowBgColorPicker(false)}
                         />
                         <div className="relative bg-white p-3 rounded-lg shadow-xl border border-gray-200">
+                          <p className="text-xs text-gray-500 mb-2">{useGradient ? 'Color 1 (Start)' : 'Background Color'}</p>
                           <HexColorPicker color={bgColor} onChange={setBgColor} />
                           <input
                             type="text"
@@ -1047,30 +1667,98 @@ function App() {
                       </div>
                     )}
                   </div>
-                  <div className="grid grid-cols-4 gap-2 mt-3">
-                    {presetColors.map(({ color, name }) => (
-                      <button
-                        key={color}
-                        onClick={() => setBgColor(color)}
-                        className="w-full aspect-square rounded-lg border-2 border-gray-300 hover:border-blue-500 transition-all"
-                        style={{ backgroundColor: color }}
-                        title={name}
+
+                  {/* Gradient Color 2 */}
+                  {useGradient && (
+                    <div className="relative mb-3">
+                      <p className="text-xs text-gray-500 mb-1">Color 2 (End)</p>
+                      <div 
+                        className="w-full h-10 sm:h-12 rounded-lg cursor-pointer border-2 border-gray-300 hover:border-blue-500 transition-all"
+                        style={{ backgroundColor: bgColor2 }}
+                        onClick={() => setShowBgColor2Picker(!showBgColor2Picker)}
                       />
-                    ))}
+                      {showBgColor2Picker && (
+                        <div className="color-picker-popup absolute z-20 mt-2 left-0 sm:left-auto">
+                          <div 
+                            className="fixed inset-0" 
+                            onClick={() => setShowBgColor2Picker(false)}
+                          />
+                          <div className="relative bg-white p-3 rounded-lg shadow-xl border border-gray-200">
+                            <HexColorPicker color={bgColor2} onChange={setBgColor2} />
+                            <input
+                              type="text"
+                              className="w-full mt-2 px-2 py-1.5 border border-gray-300 rounded text-sm font-mono text-center"
+                              value={bgColor2.toUpperCase()}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                if (/^#[0-9A-F]{0,6}$/i.test(value)) {
+                                  setBgColor2(value);
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Gradient Direction */}
+                  {useGradient && (
+                    <div className="mb-3">
+                      <p className="text-xs text-gray-500 mb-1">Direction</p>
+                      <div className="grid grid-cols-4 gap-1">
+                        {gradientDirections.map(({ value, label }) => (
+                          <button
+                            key={value}
+                            onClick={() => setGradientDirection(value)}
+                            className={`py-2 rounded text-sm font-medium transition-all ${
+                              gradientDirection === value
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            }`}
+                            title={value}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Color Palette */}
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">
+                      {extractedColors.length > 0 ? 'Extracted & Preset Colors' : 'Preset Colors'}
+                    </p>
+                    <div className="preset-colors-grid grid grid-cols-4 gap-2">
+                      {presetColors.map(({ color, name }, index) => (
+                        <button
+                          key={`${color}-${index}`}
+                          onClick={() => setBgColor(color)}
+                          className={`w-full aspect-square rounded-lg border-2 transition-all ${
+                            index < extractedColors.length 
+                              ? 'border-blue-400 ring-1 ring-blue-200' 
+                              : 'border-gray-300'
+                          } hover:border-blue-500`}
+                          style={{ backgroundColor: color }}
+                          title={name}
+                        />
+                      ))}
+                    </div>
                   </div>
                 </div>
 
                 {/* Text Color */}
-                <div className="mb-6">
+                <div className="mb-4 sm:mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">Text Color</label>
                   <div className="relative">
                     <div 
-                      className="w-full h-12 rounded-lg cursor-pointer border-2 border-gray-300 hover:border-blue-500 transition-all"
+                      className="w-full h-10 sm:h-12 rounded-lg cursor-pointer border-2 border-gray-300 hover:border-blue-500 transition-all"
                       style={{ backgroundColor: textColor }}
                       onClick={() => setShowTextColorPicker(!showTextColorPicker)}
                     />
                     {showTextColorPicker && (
-                      <div className="absolute z-20 mt-2">
+                      <div className="color-picker-popup absolute z-20 mt-2 left-0 sm:left-auto">
                         <div 
                           className="fixed inset-0" 
                           onClick={() => setShowTextColorPicker(false)}
@@ -1092,15 +1780,27 @@ function App() {
                       </div>
                     )}
                   </div>
+                  {/* Text color presets from extracted colors */}
+                  <div className="grid grid-cols-4 gap-2 mt-2">
+                    {presetColors.slice(0, 4).map(({ color, name }, index) => (
+                      <button
+                        key={`text-${color}-${index}`}
+                        onClick={() => setTextColor(color)}
+                        className="w-full aspect-square rounded-lg border-2 border-gray-300 hover:border-blue-500 transition-all"
+                        style={{ backgroundColor: color }}
+                        title={name}
+                      />
+                    ))}
+                  </div>
                 </div>
 
                 {/* Font Family */}
-                <div className="mb-6">
+                <div className="mb-4 sm:mb-6">
                   <label className="block text-sm font-medium text-gray-700 mb-2">Font Family</label>
                   <select
                     value={fontFamily}
                     onChange={(e) => setFontFamily(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    className="form-select w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-base"
                     style={{ fontFamily: fontFamily }}
                   >
                     {availableFonts.map(font => (
@@ -1109,11 +1809,11 @@ function App() {
                       </option>
                     ))}
                   </select>
-                  <p className="mt-2 text-xs text-gray-500">Preview: <span style={{ fontFamily: fontFamily, fontSize: '16px' }}>The quick brown fox jumps</span></p>
+                  <p className="mt-2 text-xs text-gray-500">Preview: <span style={{ fontFamily: fontFamily, fontSize: '14px' }}>The quick brown fox jumps</span></p>
                 </div>
 
                 {/* Shadow Toggle */}
-                <div className="mb-6">
+                <div className="mb-4 sm:mb-6">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -1121,12 +1821,12 @@ function App() {
                       onChange={(e) => setEnableShadow(e.target.checked)}
                       className="w-4 h-4 text-blue-600 rounded"
                     />
-                    <span className="text-sm font-medium text-gray-700">Enable Shadow</span>
+                    <span className="text-xs sm:text-sm font-medium text-gray-700">Enable Shadow</span>
                   </label>
                 </div>
 
                 {/* Mockup Toggle */}
-                <div className="mb-6">
+                <div className="mb-4 sm:mb-6">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -1134,16 +1834,16 @@ function App() {
                       onChange={(e) => setEnableMockups(e.target.checked)}
                       className="w-4 h-4 text-blue-600 rounded"
                     />
-                    <span className="text-sm font-medium text-gray-700">Show Device Frames</span>
+                    <span className="text-xs sm:text-sm font-medium text-gray-700">Show Device Frames</span>
                   </label>
                 </div>
 
                 {/* Text Content Editing */}
                 {templateData.elements && templateData.elements.filter(el => el.type === 'text').length > 0 && (
                   <div>
-                    <h4 className="font-semibold text-gray-900 mb-3">Edit Text</h4>
+                    <h4 className="font-semibold text-gray-900 text-sm sm:text-base mb-2 sm:mb-3">Edit Text</h4>
                     {templateData.elements.filter(el => el.type === 'text').map(element => (
-                      <div key={element.id} className="mb-4">
+                      <div key={element.id} className="mb-3 sm:mb-4">
                         <label className="block text-xs text-gray-600 mb-1 capitalize">
                           {element.id.replace('-', ' ')}
                         </label>
@@ -1151,7 +1851,7 @@ function App() {
                           type="text"
                           value={textContents[element.id] !== undefined ? textContents[element.id] : element.content}
                           onChange={(e) => handleTextChange(element.id, e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                          className="form-input w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
                           placeholder={element.content}
                         />
                       </div>
@@ -1161,28 +1861,28 @@ function App() {
               </div>
 
               {/* Action Buttons */}
-              <div className="space-y-3">
+              <div className="space-y-2 sm:space-y-3">
                 <button
                   onClick={handleDownload}
-                  className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:shadow-lg transition-all flex items-center justify-center gap-2"
+                  className="action-btn w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg font-semibold hover:shadow-lg transition-all flex items-center justify-center gap-2 text-sm sm:text-base"
                 >
-                  <Download size={20} />
+                  <Download size={18} />
                   Download Image
                 </button>
                 
                 {/* Debug: Refresh Template Button */}
                 <button
                   onClick={refreshTemplate}
-                  className="w-full bg-blue-100 text-blue-700 py-3 px-6 rounded-lg font-semibold hover:bg-blue-200 transition-all flex items-center justify-center gap-2 border border-blue-300"
+                  className="action-btn w-full bg-blue-100 text-blue-700 py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg font-semibold hover:bg-blue-200 transition-all flex items-center justify-center gap-2 border border-blue-300 text-sm sm:text-base"
                   title="Reload template from JSON file (for debugging)"
                 >
-                  <RefreshCw size={20} />
+                  <RefreshCw size={18} />
                   Refresh Template
                 </button>
                 
                 <button
                   onClick={resetAll}
-                  className="w-full bg-gray-200 text-gray-700 py-3 px-6 rounded-lg font-semibold hover:bg-gray-300 transition-all"
+                  className="action-btn w-full bg-gray-200 text-gray-700 py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg font-semibold hover:bg-gray-300 transition-all text-sm sm:text-base"
                 >
                   Start Over
                 </button>
@@ -1192,27 +1892,27 @@ function App() {
                 </div>
 
                 {/* Preview */}
-                <div className="lg:col-span-2">
-                  <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-200 sticky top-24">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="font-bold text-lg">Preview</h3>
+                <div className="customize-preview lg:col-span-2 order-first lg:order-none">
+                  <div className="preview-container bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-lg border border-gray-200 lg:sticky lg:top-24">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4 gap-2">
+                      <h3 className="font-bold text-base sm:text-lg">Preview</h3>
                       
                       {/* Debug Info */}
                       {templateData && (
-                        <div className="text-xs text-gray-500 flex items-center gap-2">
-                          <span className="px-2 py-1 bg-gray-100 rounded">
+                        <div className="debug-info text-[10px] sm:text-xs text-gray-500 flex flex-wrap items-center gap-1 sm:gap-2">
+                          <span className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-gray-100 rounded">
                             {templateData.name}
                           </span>
-                          <span className="px-2 py-1 bg-gray-100 rounded font-mono">
+                          <span className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-gray-100 rounded font-mono">
                             {templateData.canvas.width} × {templateData.canvas.height}
                           </span>
                           {templateData.devices.desktop?.mockupImage && (
-                            <span className="px-2 py-1 bg-blue-50 text-blue-600 rounded font-mono text-[10px]">
+                            <span className="hidden sm:inline px-2 py-1 bg-blue-50 text-blue-600 rounded font-mono text-[10px]">
                               D: {templateData.devices.desktop.mockupImage}
                             </span>
                           )}
                           {templateData.devices.mobile?.mockupImage && (
-                            <span className="px-2 py-1 bg-purple-50 text-purple-600 rounded font-mono text-[10px]">
+                            <span className="hidden sm:inline px-2 py-1 bg-purple-50 text-purple-600 rounded font-mono text-[10px]">
                               M: {templateData.devices.mobile.mockupImage}
                             </span>
                           )}
@@ -1220,7 +1920,7 @@ function App() {
                       )}
                     </div>
                     
-                    <div className="overflow-auto max-h-[calc(100vh-200px)]">
+                    <div className="canvas-container overflow-auto max-h-[40vh] sm:max-h-[50vh] lg:max-h-[calc(100vh-200px)]">
                       <canvas
                         ref={canvasRef}
                         className="w-full h-auto border border-gray-200 rounded-lg"
@@ -1233,6 +1933,8 @@ function App() {
           </div>
         )}
       </div>
+        </>
+      )}
     </div>
   );
 }

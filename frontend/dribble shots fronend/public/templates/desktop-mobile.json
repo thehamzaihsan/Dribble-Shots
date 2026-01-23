@@ -48,7 +48,7 @@
     {
       "id": "title",
       "type": "text",
-      "content": "Your Project Title",
+      "content": "Website Title",
       "x": 328,
       "y": 64,
       "fontSize": 57,
@@ -61,7 +61,7 @@
     {
       "id": "subtitle",
       "type": "text",
-      "content": "Beautiful responsive design",
+      "content": "https://example.com",
       "x": 328,
       "y": 136,
       "fontSize": 30,
