@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Link2, Download, Palette, Type, CheckCircle2, ArrowRight, Loader2, RefreshCw, Sparkles, Zap, Layers, MousePointer, Monitor, Smartphone, Globe, Play } from 'lucide-react';
+import { Upload, Link2, Download, Palette, Type, CheckCircle2, ArrowRight, ArrowLeft, Loader2, RefreshCw, Sparkles, Zap, Layers, MousePointer, Monitor, Smartphone, Globe, Play, Search, X, Filter } from 'lucide-react';
 import { HexColorPicker } from 'react-colorful';
 import './App.css';
 
@@ -33,6 +33,12 @@ function App() {
   const [templates, setTemplates] = useState([]);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [templateData, setTemplateData] = useState(null);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templateFilters, setTemplateFilters] = useState({
+    devices: [], // ['desktop', 'mobile']
+    hasText: null, // true, false, or null (any)
+    type: null // 'showcase', 'minimal', etc. or null (any)
+  });
   
   // Step 3: Customization
   const [bgColor, setBgColor] = useState('#ffffff');
@@ -51,6 +57,7 @@ function App() {
   
   const canvasRef = useRef(null);
   const colorExtractorRef = useRef(null);
+  const pollIntervalRef = useRef(null);
   
   const availableFonts = [
     'Aeonik',
@@ -206,10 +213,109 @@ function App() {
     } : { r: 0, g: 0, b: 0 };
   };
 
+  // Helper: Get template metadata
+  const getTemplateMetadata = (template) => {
+    const devices = [];
+    if (template.devices?.desktop?.enabled) devices.push('desktop');
+    if (template.devices?.mobile?.enabled) devices.push('mobile');
+    
+    const hasText = template.elements?.some(el => el.type === 'text') || false;
+    const type = template.type || 'showcase';
+    const tags = template.tags || [];
+    
+    return { devices, hasText, type, tags };
+  };
+
+  // Filter templates based on search and filters
+  const filteredTemplates = templates.filter(template => {
+    const metadata = getTemplateMetadata(template);
+    
+    // Search filter - check name, description, tags
+    if (templateSearch.trim()) {
+      const searchLower = templateSearch.toLowerCase();
+      const matchesSearch = 
+        template.name.toLowerCase().includes(searchLower) ||
+        template.description.toLowerCase().includes(searchLower) ||
+        metadata.tags.some(tag => tag.toLowerCase().includes(searchLower)) ||
+        metadata.type.toLowerCase().includes(searchLower);
+      
+      if (!matchesSearch) return false;
+    }
+    
+    // Device filter
+    if (templateFilters.devices.length > 0) {
+      const hasAllDevices = templateFilters.devices.every(device => 
+        metadata.devices.includes(device)
+      );
+      if (!hasAllDevices) return false;
+    }
+    
+    // Has text filter
+    if (templateFilters.hasText !== null) {
+      if (metadata.hasText !== templateFilters.hasText) return false;
+    }
+    
+    // Type filter
+    if (templateFilters.type !== null) {
+      if (metadata.type !== templateFilters.type) return false;
+    }
+    
+    return true;
+  });
+
+  // Get unique types from all templates
+  const templateTypes = [...new Set(templates.map(t => t.type || 'showcase'))];
+
+  // Toggle device filter
+  const toggleDeviceFilter = (device) => {
+    setTemplateFilters(prev => ({
+      ...prev,
+      devices: prev.devices.includes(device)
+        ? prev.devices.filter(d => d !== device)
+        : [...prev.devices, device]
+    }));
+  };
+
+  // Clear all filters
+  const clearFilters = () => {
+    setTemplateSearch('');
+    setTemplateFilters({
+      devices: [],
+      hasText: null,
+      type: null
+    });
+  };
+
   // Load templates on mount
   useEffect(() => {
     loadTemplates();
   }, []);
+
+  // Stop the status-poll interval if the component unmounts mid-poll
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Log templates when loaded
+  useEffect(() => {
+    if (templates.length > 0) {
+      console.log('✅ Templates state updated:', templates.length, 'templates');
+    } else {
+      console.log('⚠️ Templates state is empty');
+    }
+  }, [templates]);
+
+  // Reload templates when entering step 2
+  useEffect(() => {
+    if (currentStep === 2 && templates.length === 0) {
+      console.log('📋 Step 2 entered but no templates, reloading...');
+      loadTemplates();
+    }
+  }, [currentStep]);
 
   // Extract colors when screenshots are loaded
   useEffect(() => {
@@ -253,20 +359,37 @@ function App() {
 
   const loadTemplates = async () => {
     try {
+      console.log('📋 Loading templates...');
       const indexRes = await fetch(`/templates/index.json?t=${Date.now()}`);
+      
+      if (!indexRes.ok) {
+        throw new Error(`Failed to load index: ${indexRes.status}`);
+      }
+      
       const templateFiles = await indexRes.json();
+      console.log('📄 Template files:', templateFiles);
       
       const loadedTemplates = await Promise.all(
         templateFiles.map(async (file) => {
+          console.log(`📥 Loading template: ${file}`);
           const res = await fetch(`/templates/${file}?t=${Date.now()}`);
-          return await res.json();
+          
+          if (!res.ok) {
+            throw new Error(`Failed to load ${file}: ${res.status}`);
+          }
+          
+          const template = await res.json();
+          console.log(`✅ Loaded template: ${template.id}`);
+          return template;
         })
       );
       
+      console.log('🎉 All templates loaded:', loadedTemplates.length);
       setTemplates(loadedTemplates);
       return loadedTemplates;
     } catch (err) {
-      console.error('Failed to load templates:', err);
+      console.error('❌ Failed to load templates:', err);
+      console.error('Stack:', err.stack);
       return [];
     }
   };
@@ -337,16 +460,16 @@ function App() {
       setLoadingProgress(10);
 
       // Poll for job status
-      const pollInterval = setInterval(async () => {
+      pollIntervalRef.current = setInterval(async () => {
         try {
           const statusResponse = await fetch(`${API_BASE}/capture/status/${currentJobId}`);
-          
+
           if (!statusResponse.ok) {
             throw new Error('Failed to check job status');
           }
 
           const statusData = await statusResponse.json();
-          
+
           // Update queue position
           if (statusData.queue_position > 0) {
             setQueuePosition(statusData.queue_position);
@@ -357,42 +480,46 @@ function App() {
             setLoadingMessage('Processing your request...');
             setLoadingProgress(30);
           } else if (statusData.status === 'completed') {
-            clearInterval(pollInterval);
-            
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+
             setLoadingMessage('Processing screenshots...');
                             setLoadingProgress(70);
-                            
-                            setDesktopSrc(`data:image/png;base64,${statusData.result.desktop}`);
-                            setMobileSrc(`data:image/png;base64,${statusData.result.mobile}`);
+
+                            setDesktopSrc(`data:image/jpeg;base64,${statusData.result.desktop}`);
+                            setMobileSrc(`data:image/jpeg;base64,${statusData.result.mobile}`);
                             // Store website title from backend
                             if (statusData.result.title) {
                               setWebsiteTitle(statusData.result.title);
                             }
-            
+
             setLoadingProgress(100);
             setLoadingMessage('Complete!');
             setQueuePosition(0);
-            
+
             // Small delay to show completion
             setTimeout(() => {
               setCurrentStep(2); // Move to template selection
               setLoading(false);
               setJobId(null);
             }, 300);
-            
+
           } else if (statusData.status === 'failed') {
-            clearInterval(pollInterval);
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
             throw new Error(statusData.error || 'Job failed');
           }
         } catch (err) {
-          clearInterval(pollInterval);
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
           setError(err.message);
           setLoading(false);
           setLoadingProgress(0);
           setQueuePosition(0);
           setJobId(null);
         }
-      }, 10000); // Poll every 10 seconds
+      }, 1500); // Poll every 1.5s — most captures finish in 1-3s, so a 10s
+      // interval meant waiting up to 10s after the job was already done
       
     } catch (err) {
       setError(err.message);
@@ -900,7 +1027,7 @@ function App() {
       {/* App Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
         <div className="header-content max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-3 md:gap-0">
+          <div className="flex items-center gap-3">
             <div 
               className="logo-section flex items-center gap-2 sm:gap-3 cursor-pointer hover:opacity-80 transition-opacity" 
               onClick={goHome}
@@ -913,23 +1040,23 @@ function App() {
                     <rect width="100" height="100" rx="16" />
                   </clipPath>
                 </defs>
-                <g clip-path="url(#clip_path_1)">
-                  <rect width="100" height="100" fill="#FFFFFF" fill-rule="evenodd" />
+                <g clipPath="url(#clip_path_1)">
+                  <rect width="100" height="100" fill="#FFFFFF" fillRule="evenodd" />
                   <g transform="translate(20 -5)">
                     <g transform="translate(1.655 0)">
                       <path d="M27.5 0L55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0Z" />
-                      <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#5151E3" fill-rule="evenodd" />
+                      <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#5151E3" fillRule="evenodd" />
                     </g>
                     <g transform="translate(1.655 42)">
                       <path d="M27.5 0L55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0Z" />
-                      <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#5151E3" fill-rule="evenodd" />
+                      <path d="M27.5 10.6241L9 22.2286L9 46.7714L27.5 58.3759L46 46.7714L46 22.2286L27.5 10.6241ZM55 17.25L55 51.75L27.5 69L0 51.75L0 17.25L27.5 0L55 17.25Z" fill="#5151E3" fillRule="evenodd" />
                     </g>
-                    <rect width="59" height="28" fill="#FFFFFF" fill-rule="evenodd" />
-                    <rect width="59" height="28" fill="#FFFFFF" fill-rule="evenodd" transform="translate(0 83)" />
-                    <path d="M0 0L9.1781 5.7424" fill="none" stroke-width="1" stroke="#FFFFFF" stroke-linecap="square" transform="translate(6.799 55.58)" />
-                    <path d="M8.86774 0L0 5.59073" fill="none" stroke-width="1" stroke="#FFFFFF" stroke-linecap="square" transform="translate(42.573 55.6)" />
-                    <path d="M0 0L9.41765 5.91177" fill="none" stroke-width="1" stroke="#FFFFFF" stroke-linecap="square" transform="translate(16.129 49.629)" />
-                    <path d="M9.49545 0L0 5.96036" fill="none" stroke-width="1" stroke="#FFFFFF" stroke-linecap="square" transform="translate(33.156 49.322)" />
+                    <rect width="59" height="28" fill="#FFFFFF" fillRule="evenodd" />
+                    <rect width="59" height="28" fill="#FFFFFF" fillRule="evenodd" transform="translate(0 83)" />
+                    <path d="M0 0L9.1781 5.7424" fill="none" strokeWidth="1" stroke="#FFFFFF" strokeLinecap="square" transform="translate(6.799 55.58)" />
+                    <path d="M8.86774 0L0 5.59073" fill="none" strokeWidth="1" stroke="#FFFFFF" strokeLinecap="square" transform="translate(42.573 55.6)" />
+                    <path d="M0 0L9.41765 5.91177" fill="none" strokeWidth="1" stroke="#FFFFFF" strokeLinecap="square" transform="translate(16.129 49.629)" />
+                    <path d="M9.49545 0L0 5.96036" fill="none" strokeWidth="1" stroke="#FFFFFF" strokeLinecap="square" transform="translate(33.156 49.322)" />
                   </g>
                 </g>
               </svg>
@@ -943,7 +1070,7 @@ function App() {
             </div>
             
             {/* Progress Steps */}
-            <div className="progress-steps flex items-center gap-2 sm:gap-4">
+            <div className="progress-steps flex items-center gap-2 sm:gap-4 ml-auto">
               {[
                 { num: 1, label: 'Input' },
                 { num: 2, label: 'Template' },
@@ -1009,10 +1136,11 @@ function App() {
             {/* URL Input */}
             {inputMethod === 'url' && (
               <div className="bg-white rounded-2xl p-4 sm:p-8 shadow-lg border border-gray-200">
-                <label className="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">
+                <label htmlFor="website-url" className="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">
                   Website URL
                 </label>
                 <input
+                  id="website-url"
                   type="url"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
@@ -1045,14 +1173,14 @@ function App() {
                 </div>
 
                 {error && (
-                  <div className="mt-3 sm:mt-4 p-2.5 sm:p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs sm:text-sm">
+                  <div role="alert" className="mt-3 sm:mt-4 p-2.5 sm:p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs sm:text-sm">
                     {error}
                   </div>
                 )}
 
                 {/* Progress Bar */}
                 {loading && (
-                  <div className="loading-container mt-3 sm:mt-4">
+                  <div className="loading-container mt-3 sm:mt-4" role="status" aria-live="polite">
                     <div className="mb-2 flex items-center justify-between text-xs sm:text-sm">
                       <span className="text-gray-600">{loadingMessage}</span>
                       <span className="font-semibold text-blue-600">{Math.round(loadingProgress)}%</span>
@@ -1100,10 +1228,11 @@ function App() {
               <div className="bg-white rounded-2xl p-4 sm:p-8 shadow-lg border border-gray-200">
                 <div className="space-y-4 sm:space-y-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">
+                    <label htmlFor="desktop-screenshot" className="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">
                       Desktop Screenshot
                     </label>
                     <input
+                      id="desktop-screenshot"
                       type="file"
                       accept="image/*"
                       onChange={(e) => handleFileUpload(e, 'desktop')}
@@ -1117,10 +1246,11 @@ function App() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">
+                    <label htmlFor="mobile-screenshot" className="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">
                       Mobile Screenshot (Optional)
                     </label>
                     <input
+                      id="mobile-screenshot"
                       type="file"
                       accept="image/*"
                       onChange={(e) => handleFileUpload(e, 'mobile')}
@@ -1134,7 +1264,7 @@ function App() {
                   </div>
 
                   {error && (
-                    <div className="p-2.5 sm:p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs sm:text-sm">
+                    <div role="alert" className="p-2.5 sm:p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs sm:text-sm">
                       {error}
                     </div>
                   )}
@@ -1160,32 +1290,200 @@ function App() {
               <p className="step-subtitle text-sm sm:text-base text-gray-600">Select a layout that best fits your needs</p>
             </div>
 
-            <div className="template-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-              {templates.map((template) => (
+            {/* Search and Filters */}
+            <div className="mb-6 space-y-4">
+              {/* Search Bar */}
+              <div className="relative max-w-md mx-auto">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} aria-hidden="true" />
+                <input
+                  type="text"
+                  aria-label="Search templates"
+                  value={templateSearch}
+                  onChange={(e) => setTemplateSearch(e.target.value)}
+                  placeholder="Search templates..."
+                  className="w-full pl-10 pr-10 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+                />
+                {templateSearch && (
+                  <button
+                    onClick={() => setTemplateSearch('')}
+                    aria-label="Clear search"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <X size={18} />
+                  </button>
+                )}
+              </div>
+
+              {/* Filter Chips */}
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {/* Device Filters */}
                 <button
-                  key={template.id}
-                  onClick={() => handleTemplateSelect(template)}
-                  className="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-lg border-2 border-gray-200 hover:border-blue-600 transition-all text-left group"
+                  onClick={() => toggleDeviceFilter('desktop')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                    templateFilters.devices.includes('desktop')
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 >
-                  <div className="aspect-video bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg mb-3 sm:mb-4 flex items-center justify-center relative overflow-hidden">
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      {template.devices.desktop.enabled && (
-                        <div className="w-12 sm:w-16 h-8 sm:h-10 bg-white rounded shadow-lg mr-2" />
-                      )}
-                      {template.devices.mobile?.enabled && (
-                        <div className="w-4 sm:w-6 h-10 sm:h-12 bg-white rounded-lg shadow-lg" />
-                      )}
-                    </div>
-                  </div>
-                  <h3 className="font-bold text-base sm:text-lg text-gray-900 mb-1">{template.name}</h3>
-                  <p className="text-xs sm:text-sm text-gray-600">{template.description}</p>
-                  <div className="mt-3 sm:mt-4 text-blue-600 font-semibold text-xs sm:text-sm flex items-center gap-1 sm:gap-2 group-hover:gap-2 sm:group-hover:gap-3 transition-all">
-                    Select Template
-                    <ArrowRight size={14} />
-                  </div>
+                  <Monitor size={14} />
+                  Desktop
                 </button>
-              ))}
+                <button
+                  onClick={() => toggleDeviceFilter('mobile')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                    templateFilters.devices.includes('mobile')
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <Smartphone size={14} />
+                  Mobile
+                </button>
+
+                {/* Text Filter */}
+                <button
+                  onClick={() => setTemplateFilters(prev => ({
+                    ...prev,
+                    hasText: prev.hasText === true ? null : true
+                  }))}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                    templateFilters.hasText === true
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <Type size={14} />
+                  With Text
+                </button>
+                <button
+                  onClick={() => setTemplateFilters(prev => ({
+                    ...prev,
+                    hasText: prev.hasText === false ? null : false
+                  }))}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                    templateFilters.hasText === false
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <Layers size={14} />
+                  No Text
+                </button>
+
+                {/* Clear Filters */}
+                {(templateSearch || templateFilters.devices.length > 0 || templateFilters.hasText !== null || templateFilters.type !== null) && (
+                  <button
+                    onClick={clearFilters}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-red-50 text-red-600 hover:bg-red-100 transition-all"
+                  >
+                    <X size={14} />
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {/* Results count */}
+              <p className="text-center text-sm text-gray-500">
+                {filteredTemplates.length} {filteredTemplates.length === 1 ? 'template' : 'templates'} found
+              </p>
             </div>
+
+            {/* Template Grid */}
+            {filteredTemplates.length > 0 ? (
+              <div className="template-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                {filteredTemplates.map((template) => {
+                  const metadata = getTemplateMetadata(template);
+                  return (
+                    <button
+                      key={template.id}
+                      onClick={() => handleTemplateSelect(template)}
+                      className="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-lg border-2 border-gray-200 hover:border-blue-600 hover:shadow-xl transition-all text-left group"
+                    >
+                      {/* Preview Image or Placeholder */}
+                      <div className="aspect-video bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg mb-3 sm:mb-4 relative overflow-hidden">
+                        {template.previewImage ? (
+                          <img 
+                            src={template.previewImage} 
+                            alt={template.name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              e.target.nextSibling.style.display = 'flex';
+                            }}
+                          />
+                        ) : null}
+                        {/* Fallback device icons */}
+                        <div className={`absolute inset-0 flex items-center justify-center ${template.previewImage ? 'hidden' : ''}`}>
+                          {metadata.devices.includes('desktop') && (
+                            <div className="w-12 sm:w-16 h-8 sm:h-10 bg-white rounded shadow-lg mr-2 flex items-center justify-center">
+                              <Monitor size={16} className="text-gray-400" />
+                            </div>
+                          )}
+                          {metadata.devices.includes('mobile') && (
+                            <div className="w-4 sm:w-6 h-10 sm:h-12 bg-white rounded-lg shadow-lg flex items-center justify-center">
+                              <Smartphone size={12} className="text-gray-400" />
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Type Badge */}
+                        <div className="absolute top-2 left-2">
+                          <span className="px-2 py-1 bg-white/90 backdrop-blur-sm rounded-md text-xs font-medium text-gray-700 capitalize">
+                            {metadata.type}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Template Info */}
+                      <h3 className="font-bold text-base sm:text-lg text-gray-900 mb-1">{template.name}</h3>
+                      <p className="text-xs sm:text-sm text-gray-600 mb-3">{template.description}</p>
+                      
+                      {/* Metadata Badges */}
+                      <div className="flex flex-wrap gap-1.5 mb-3">
+                        {metadata.devices.includes('desktop') && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-medium">
+                            <Monitor size={10} />
+                            Desktop
+                          </span>
+                        )}
+                        {metadata.devices.includes('mobile') && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-green-50 text-green-700 rounded text-xs font-medium">
+                            <Smartphone size={10} />
+                            Mobile
+                          </span>
+                        )}
+                        {metadata.hasText && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs font-medium">
+                            <Type size={10} />
+                            Text
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Select Button */}
+                      <div className="text-blue-600 font-semibold text-xs sm:text-sm flex items-center gap-1 sm:gap-2 group-hover:gap-2 sm:group-hover:gap-3 transition-all">
+                        Select Template
+                        <ArrowRight size={14} />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Search size={24} className="text-gray-400" />
+                </div>
+                <h3 className="font-semibold text-gray-900 mb-2">No templates found</h3>
+                <p className="text-gray-600 text-sm mb-4">Try adjusting your search or filters</p>
+                <button
+                  onClick={clearFilters}
+                  className="text-blue-600 font-medium text-sm hover:underline"
+                >
+                  Clear all filters
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -1543,6 +1841,14 @@ function App() {
                 >
                   <Download size={18} />
                   Download Image
+                </button>
+                
+                <button
+                  onClick={() => setCurrentStep(2)}
+                  className="action-btn w-full bg-purple-100 text-purple-700 py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg font-semibold hover:bg-purple-200 transition-all flex items-center justify-center gap-2 border border-purple-300 text-sm sm:text-base"
+                >
+                  <ArrowLeft size={18} />
+                  Back to Templates
                 </button>
                 
                 {/* Debug: Refresh Template Button */}

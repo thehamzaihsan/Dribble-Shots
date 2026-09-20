@@ -1,1 +1,5 @@
-["desktop-mobile.json"]
+[
+  "desktop-mobile.json",
+  "macbook-only.json",
+  "mobile-only.json"
+]

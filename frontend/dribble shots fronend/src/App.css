@@ -30,16 +30,14 @@ html, body {
 
 /* Mobile Header Adjustments */
 @media (max-width: 768px) {
-  /* Header layout - stack on mobile */
+  /* Header layout - keep horizontal */
   .header-content {
-    flex-direction: column;
-    gap: 1rem;
     padding: 0.75rem 1rem;
   }
   
   /* Logo section */
   .logo-section {
-    justify-content: center;
+    flex-shrink: 1;
   }
   
   .logo-section svg {
@@ -58,8 +56,7 @@ html, body {
   /* Progress steps - compact on mobile */
   .progress-steps {
     gap: 0.5rem;
-    flex-wrap: wrap;
-    justify-content: center;
+    flex-wrap: nowrap;
   }
   
   .progress-steps .step-circle {

@@ -100,5 +100,8 @@ body {
 #root {
   width: 100%;
   min-height: 100vh;
+  /* Leaves room for the fixed SiteFooter so it never covers the last bit
+     of page content (was overlapping hero text on short viewports). */
+  padding-bottom: 34px;
 }
 

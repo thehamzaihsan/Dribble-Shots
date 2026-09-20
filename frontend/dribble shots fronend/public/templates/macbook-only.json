@@ -1,10 +1,10 @@
 {
-  "id": "desktop-mobile",
-  "name": "Desktop + Mobile",
-  "description": "Desktop and mobile side by side with mockup frames",
-  "previewImage": "/templates/previews/desktop-mobile.png",
+  "id": "macbook-only",
+  "name": "MacBook Only",
+  "description": "Clean MacBook screen mockup showcasing your website",
+  "previewImage": "/templates/previews/macbook-only.png",
   "type": "showcase",
-  "tags": ["desktop", "mobile", "mockup", "side-by-side"],
+  "tags": ["desktop", "macbook", "minimalist", "focused"],
   "canvas": {
     "width": 1920,
     "height": 1080
@@ -12,9 +12,9 @@
   "devices": {
     "desktop": {
       "enabled": true,
-      "x":337,
-      "y": 240,
-      "width": 1154,
+      "x": 385,
+      "y": 155,
+      "width": 1150,
       "height": 770,
       "borderRadius": 20,
       "shadow": true,
@@ -29,22 +29,7 @@
       }
     },
     "mobile": {
-      "enabled": true,
-      "x": 1313,
-      "y": 349,
-      "width": 383,
-      "height": 846.29,
-      "borderRadius": 40,
-      "shadow": true,
-      "crop": true,
-      "mockup": true,
-      "mockupImage": "/Android.png",
-      "mockupConfig": {
-        "x": 1302,
-        "y": 335,
-        "width": 410,
-        "height": 876
-      }
+      "enabled": false
     }
   },
   "elements": [

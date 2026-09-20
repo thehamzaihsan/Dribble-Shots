@@ -1,39 +1,24 @@
 {
-  "id": "desktop-mobile",
-  "name": "Desktop + Mobile",
-  "description": "Desktop and mobile side by side with mockup frames",
-  "previewImage": "/templates/previews/desktop-mobile.png",
+  "id": "mobile-only",
+  "name": "Mobile Only",
+  "description": "Elegant mobile device mockup for responsive designs",
+  "previewImage": "/templates/previews/mobile-only.png",
   "type": "showcase",
-  "tags": ["desktop", "mobile", "mockup", "side-by-side"],
+  "tags": ["mobile", "phone", "minimalist", "responsive"],
   "canvas": {
     "width": 1920,
     "height": 1080
   },
   "devices": {
     "desktop": {
-      "enabled": true,
-      "x":337,
-      "y": 240,
-      "width": 1154,
-      "height": 770,
-      "borderRadius": 20,
-      "shadow": true,
-      "crop": true,
-      "mockup": true,
-      "mockupImage": "/Desktop.png",
-      "mockupConfig": {
-        "x": 191,
-        "y": 211,
-        "width": 1445,
-        "height": 876
-      }
+      "enabled": false
     },
     "mobile": {
       "enabled": true,
-      "x": 1313,
-      "y": 349,
-      "width": 383,
-      "height": 846.29,
+      "x": 768,
+      "y": 240,
+      "width": 384,
+      "height": 846,
       "borderRadius": 40,
       "shadow": true,
       "crop": true,
@@ -51,27 +36,27 @@
     {
       "id": "title",
       "type": "text",
-      "content": "Website Title",
+      "content": "Mobile App",
       "x": 328,
       "y": 64,
       "fontSize": 57,
       "fontFamily": "Aeonik",
       "fontWeight": "bold",
       "color": "#000000",
-      "textAlign": "left",
+      "textAlign": "center",
       "maxWidth": 1200
     },
     {
       "id": "subtitle",
       "type": "text",
-      "content": "https://example.com",
+      "content": "Responsive & Beautiful",
       "x": 328,
       "y": 136,
       "fontSize": 30,
       "fontFamily": "Aeonik",
       "fontWeight": "normal",
       "color": "#666666",
-      "textAlign": "left",
+      "textAlign": "center",
       "maxWidth": 1000
     }
   ]
