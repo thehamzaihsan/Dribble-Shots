@@ -1,0 +1,93 @@
+{
+  "id": "all-devices",
+  "name": "Desktop + Tablet + Mobile",
+  "description": "Flagship showcase across all three screen sizes side by side",
+  "previewImage": "/templates/previews/all-devices.png",
+  "type": "showcase",
+  "tags": ["desktop", "tablet", "mobile", "mockup", "responsive"],
+  "canvas": {
+    "width": 1920,
+    "height": 1080
+  },
+  "devices": {
+    "desktop": {
+      "enabled": true,
+      "x": 150,
+      "y": 422,
+      "width": 866,
+      "height": 578,
+      "borderRadius": 15,
+      "shadow": true,
+      "crop": true,
+      "mockup": true,
+      "mockupImage": "/Desktop.png",
+      "mockupConfig": {
+        "x": 40,
+        "y": 400,
+        "width": 1084,
+        "height": 657
+      }
+    },
+    "tablet": {
+      "enabled": true,
+      "x": 1164,
+      "y": 520,
+      "width": 360,
+      "height": 480,
+      "borderRadius": 23,
+      "shadow": true,
+      "crop": true,
+      "mockup": false,
+      "bezel": {
+        "color": "#111111",
+        "width": 18
+      }
+    },
+    "mobile": {
+      "enabled": true,
+      "x": 1564,
+      "y": 535,
+      "width": 211,
+      "height": 465,
+      "borderRadius": 22,
+      "shadow": true,
+      "crop": true,
+      "mockup": true,
+      "mockupImage": "/Android.png",
+      "mockupConfig": {
+        "x": 1558,
+        "y": 527,
+        "width": 226,
+        "height": 482
+      }
+    }
+  },
+  "elements": [
+    {
+      "id": "title",
+      "type": "text",
+      "content": "Every Screen Size",
+      "x": 960,
+      "y": 64,
+      "fontSize": 57,
+      "fontFamily": "Aeonik",
+      "fontWeight": "bold",
+      "color": "#000000",
+      "textAlign": "center",
+      "maxWidth": 1600
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "content": "https://example.com",
+      "x": 960,
+      "y": 136,
+      "fontSize": 30,
+      "fontFamily": "Aeonik",
+      "fontWeight": "normal",
+      "color": "#666666",
+      "textAlign": "center",
+      "maxWidth": 1200
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Link2, Download, Type, CheckCircle2, ArrowRight, ArrowLeft, Loader2, Layers, Monitor, Smartphone, Search, X } from 'lucide-react';
+import { Upload, Link2, Download, Type, CheckCircle2, ArrowRight, ArrowLeft, Loader2, Layers, Monitor, Tablet, Smartphone, Search, X } from 'lucide-react';
 import { HexColorPicker } from 'react-colorful';
 import './App.css';
 
@@ -23,9 +23,10 @@ function App() {
 
   // Screenshots from backend
   const [desktopSrc, setDesktopSrc] = useState(null);
+  const [tabletSrc, setTabletSrc] = useState(null);
   const [mobileSrc, setMobileSrc] = useState(null);
   const [websiteTitle, setWebsiteTitle] = useState('');
-  
+
   // Step 2: Templates
   const [templates, setTemplates] = useState([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
@@ -33,7 +34,7 @@ function App() {
   const [templateData, setTemplateData] = useState(null);
   const [templateSearch, setTemplateSearch] = useState('');
   const [templateFilters, setTemplateFilters] = useState({
-    devices: [], // ['desktop', 'mobile']
+    devices: [], // ['desktop', 'tablet', 'mobile']
     hasText: null, // true, false, or null (any)
     type: null // 'showcase', 'minimal', etc. or null (any)
   });
@@ -214,6 +215,7 @@ function App() {
   const getTemplateMetadata = (template) => {
     const devices = [];
     if (template.devices?.desktop?.enabled) devices.push('desktop');
+    if (template.devices?.tablet?.enabled) devices.push('tablet');
     if (template.devices?.mobile?.enabled) devices.push('mobile');
     
     const hasText = template.elements?.some(el => el.type === 'text') || false;
@@ -307,42 +309,36 @@ function App() {
   // Extract colors when screenshots are loaded
   useEffect(() => {
     const extractColors = async () => {
-      if (desktopSrc) {
-        const colors = await extractColorsFromImage(desktopSrc);
-        if (colors.length > 0) {
-          setExtractedColors(colors);
-          // Optionally set the first extracted color as default background
-          // setBgColor(colors[0].color);
-        }
-      } else if (mobileSrc) {
-        const colors = await extractColorsFromImage(mobileSrc);
-        if (colors.length > 0) {
-          setExtractedColors(colors);
-        }
+      // Prefer desktop, then tablet, then mobile as the color source
+      const src = desktopSrc || tabletSrc || mobileSrc;
+      if (!src) return;
+      const colors = await extractColorsFromImage(src);
+      if (colors.length > 0) {
+        setExtractedColors(colors);
       }
     };
-    
+
     extractColors();
-  }, [desktopSrc, mobileSrc]);
+  }, [desktopSrc, tabletSrc, mobileSrc]);
 
   // Detect when images are loaded
   useEffect(() => {
-    if (imagesLoading && (desktopSrc || mobileSrc)) {
+    if (imagesLoading && (desktopSrc || tabletSrc || mobileSrc)) {
       // Images have loaded
       setImagesLoading(false);
     }
-  }, [desktopSrc, mobileSrc, imagesLoading]);
+  }, [desktopSrc, tabletSrc, mobileSrc, imagesLoading]);
 
   // Draw canvas when template or customization changes
   useEffect(() => {
-    if (templateData && (desktopSrc || mobileSrc) && currentStep >= 3) {
+    if (templateData && (desktopSrc || tabletSrc || mobileSrc) && currentStep >= 3) {
       // Use a small timeout to ensure the canvas element is mounted
       const timer = setTimeout(() => {
         drawCanvas();
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [templateData, desktopSrc, mobileSrc, bgColor, bgColor2, useGradient, gradientDirection, textColor, fontFamily, enableShadow, enableMockups, textContents, currentStep]);
+  }, [templateData, desktopSrc, tabletSrc, mobileSrc, bgColor, bgColor2, useGradient, gradientDirection, textColor, fontFamily, enableShadow, enableMockups, textContents, currentStep]);
 
   const loadTemplates = async () => {
     setTemplatesLoading(true);
@@ -455,6 +451,7 @@ function App() {
                             setLoadingProgress(70);
 
                             setDesktopSrc(`data:image/jpeg;base64,${statusData.result.desktop}`);
+                            setTabletSrc(`data:image/jpeg;base64,${statusData.result.tablet}`);
                             setMobileSrc(`data:image/jpeg;base64,${statusData.result.mobile}`);
                             // Store website title from backend
                             if (statusData.result.title) {
@@ -503,6 +500,8 @@ function App() {
     reader.onload = (event) => {
       if (type === 'desktop') {
         setDesktopSrc(event.target.result);
+      } else if (type === 'tablet') {
+        setTabletSrc(event.target.result);
       } else {
         setMobileSrc(event.target.result);
       }
@@ -511,7 +510,7 @@ function App() {
   };
 
   const handleUploadComplete = () => {
-    if (!desktopSrc && !mobileSrc) {
+    if (!desktopSrc && !tabletSrc && !mobileSrc) {
       setError('Please upload at least one screenshot');
       return;
     }
@@ -520,7 +519,7 @@ function App() {
 
   const handleTemplateSelect = (template) => {
     setTemplateData(template);
-    setEnableShadow(template.devices.desktop.shadow || template.devices.mobile?.shadow || false);
+    setEnableShadow(template.devices.desktop?.shadow || template.devices.tablet?.shadow || template.devices.mobile?.shadow || false);
     
     // Initialize text contents from template
     // Auto-populate title with website title from backend, subtitle with URL
@@ -541,7 +540,7 @@ function App() {
     setTextContents(initialTexts);
     
     // Set images loading state if screenshots aren't ready yet
-    if (!desktopSrc && !mobileSrc) {
+    if (!desktopSrc && !tabletSrc && !mobileSrc) {
       setImagesLoading(true);
     }
     
@@ -636,20 +635,19 @@ function App() {
 
     // Load all images first
     const imagesToLoad = [];
+    const deviceKeys = ['desktop', 'tablet', 'mobile'];
+    const srcByDevice = { desktop: desktopSrc, tablet: tabletSrc, mobile: mobileSrc };
 
-    if (templateData.devices?.desktop?.enabled && desktopSrc) {
-      imagesToLoad.push(loadImage(desktopSrc).then(img => ({ type: 'desktop', img })));
-      if (enableMockups && templateData.devices.desktop.mockupImage) {
-        imagesToLoad.push(loadImage(templateData.devices.desktop.mockupImage).then(img => ({ type: 'desktopMockup', img })));
-      }
-    }
+    deviceKeys.forEach((key) => {
+      const device = templateData.devices?.[key];
+      const src = srcByDevice[key];
+      if (!device?.enabled || !src) return;
 
-    if (templateData.devices?.mobile?.enabled && mobileSrc) {
-      imagesToLoad.push(loadImage(mobileSrc).then(img => ({ type: 'mobile', img })));
-      if (enableMockups && templateData.devices.mobile.mockupImage) {
-        imagesToLoad.push(loadImage(templateData.devices.mobile.mockupImage).then(img => ({ type: 'mobileMockup', img })));
+      imagesToLoad.push(loadImage(src).then(img => ({ type: key, img })));
+      if (enableMockups && device.mockupImage) {
+        imagesToLoad.push(loadImage(device.mockupImage).then(img => ({ type: `${key}Mockup`, img })));
       }
-    }
+    });
 
     // Load extra device mockups
     if (templateData.extraDevices && mobileSrc) {
@@ -672,25 +670,18 @@ function App() {
 
     drawBackground();
 
-    // Draw desktop device
-    if (templateData.devices?.desktop?.enabled && desktopSrc && images.desktop) {
-      const device = templateData.devices.desktop;
-      if (enableMockups && device.mockupImage && images.desktopMockup) {
-        drawDeviceWithMockupImageSync(ctx, images.desktop, images.desktopMockup, device);
-      } else {
-        drawSimpleDevice(ctx, images.desktop, device);
-      }
-    }
+    // Draw desktop/tablet/mobile devices
+    deviceKeys.forEach((key) => {
+      const device = templateData.devices?.[key];
+      const src = srcByDevice[key];
+      if (!device?.enabled || !src || !images[key]) return;
 
-    // Draw mobile device
-    if (templateData.devices?.mobile?.enabled && mobileSrc && images.mobile) {
-      const device = templateData.devices.mobile;
-      if (enableMockups && device.mockupImage && images.mobileMockup) {
-        drawDeviceWithMockupImageSync(ctx, images.mobile, images.mobileMockup, device);
+      if (enableMockups && device.mockupImage && images[`${key}Mockup`]) {
+        drawDeviceWithMockupImageSync(ctx, images[key], images[`${key}Mockup`], device);
       } else {
-        drawSimpleDevice(ctx, images.mobile, device);
+        drawSimpleDevice(ctx, images[key], device);
       }
-    }
+    });
 
     // Draw extra devices
     if (templateData.extraDevices && mobileSrc && images.mobile) {
@@ -777,11 +768,47 @@ function App() {
     ctx.restore();
   };
 
+  // device.bezel (optional: {color, width}) draws a flat vector device frame
+  // - no mockup PNG asset needed. When set, device.x/y/width/height are the
+  // OUTER frame bounds (unlike the mockup-image path, where they're the
+  // screen cutout) and the screenshot is inset by bezel.width on all sides.
   const drawSimpleDevice = (ctx, img, device) => {
+    const bezelWidth = device.bezel?.width || 0;
+    const bezelColor = device.bezel?.color || '#111111';
+
+    if (bezelWidth > 0) {
+      ctx.save();
+      if (enableShadow && device.shadow) {
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+        ctx.shadowBlur = 40;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 20;
+      }
+      ctx.fillStyle = bezelColor;
+      ctx.beginPath();
+      roundRect(ctx, device.x, device.y, device.width, device.height, device.borderRadius);
+      ctx.fill();
+      ctx.restore();
+
+      // Camera dot, centered in the top bezel
+      ctx.save();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.beginPath();
+      ctx.arc(device.x + device.width / 2, device.y + bezelWidth / 2, Math.max(bezelWidth * 0.18, 3), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    const screenX = device.x + bezelWidth;
+    const screenY = device.y + bezelWidth;
+    const screenWidth = device.width - bezelWidth * 2;
+    const screenHeight = device.height - bezelWidth * 2;
+    const screenRadius = bezelWidth > 0 ? Math.max(device.borderRadius - bezelWidth * 0.6, 4) : device.borderRadius;
+
     ctx.save();
-    
-    // Shadow
-    if (enableShadow && device.shadow) {
+
+    // Shadow (only when there's no bezel already casting one above)
+    if (bezelWidth === 0 && enableShadow && device.shadow) {
       ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
       ctx.shadowBlur = 40;
       ctx.shadowOffsetX = 0;
@@ -790,7 +817,7 @@ function App() {
 
     // Rounded rectangle clip
     ctx.beginPath();
-    roundRect(ctx, device.x, device.y, device.width, device.height, device.borderRadius);
+    roundRect(ctx, screenX, screenY, screenWidth, screenHeight, screenRadius);
     ctx.clip();
 
     // Check if cropping is enabled (default true)
@@ -801,7 +828,7 @@ function App() {
     if (cropEnabled) {
       // Calculate aspect ratios for proper cropping
       const imgAspect = img.width / img.height;
-      const targetAspect = device.width / device.height;
+      const targetAspect = screenWidth / screenHeight;
 
       // Crop to fit (cover behavior) - crop from top
       if (imgAspect > targetAspect) {
@@ -816,16 +843,18 @@ function App() {
     }
 
     // Draw screenshot with cropping
-    ctx.drawImage(img, sx, sy, sw, sh, device.x, device.y, device.width, device.height);
+    ctx.drawImage(img, sx, sy, sw, sh, screenX, screenY, screenWidth, screenHeight);
 
     ctx.restore();
 
-    // Border
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    roundRect(ctx, device.x, device.y, device.width, device.height, device.borderRadius);
-    ctx.stroke();
+    if (bezelWidth === 0) {
+      // Hairline border for the no-frame-at-all case
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      roundRect(ctx, device.x, device.y, device.width, device.height, device.borderRadius);
+      ctx.stroke();
+    }
   };
 
   const drawText = (ctx, element) => {
@@ -936,6 +965,7 @@ function App() {
     setCurrentStep(1);
     setUrl('');
     setDesktopSrc(null);
+    setTabletSrc(null);
     setMobileSrc(null);
     setWebsiteTitle('');
     setTemplateData(null);
@@ -1185,6 +1215,24 @@ function App() {
                   </div>
 
                   <div>
+                    <label htmlFor="tablet-screenshot" className="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">
+                      Tablet Screenshot (Optional)
+                    </label>
+                    <input
+                      id="tablet-screenshot"
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleFileUpload(e, 'tablet')}
+                      className="form-input w-full px-3 sm:px-4 py-2.5 sm:py-3 border border-gray-300 rounded-lg text-sm"
+                    />
+                    {tabletSrc && (
+                      <div className="mt-2 sm:mt-3">
+                        <img src={tabletSrc} alt="Tablet preview" className="upload-preview max-w-full h-24 sm:h-32 object-cover rounded-lg border border-gray-200" />
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
                     <label htmlFor="mobile-screenshot" className="block text-sm font-medium text-gray-700 mb-2 sm:mb-3">
                       Mobile Screenshot (Optional)
                     </label>
@@ -1266,6 +1314,17 @@ function App() {
                 >
                   <Monitor size={14} />
                   Desktop
+                </button>
+                <button
+                  onClick={() => toggleDeviceFilter('tablet')}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all ${
+                    templateFilters.devices.includes('tablet')
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <Tablet size={14} />
+                  Tablet
                 </button>
                 <button
                   onClick={() => toggleDeviceFilter('mobile')}
@@ -1394,6 +1453,11 @@ function App() {
                               <Monitor size={16} className="text-gray-400" />
                             </div>
                           )}
+                          {metadata.devices.includes('tablet') && (
+                            <div className="w-6 sm:w-8 h-9 sm:h-11 bg-white rounded-lg shadow-lg mr-2 flex items-center justify-center">
+                              <Tablet size={14} className="text-gray-400" />
+                            </div>
+                          )}
                           {metadata.devices.includes('mobile') && (
                             <div className="w-4 sm:w-6 h-10 sm:h-12 bg-white rounded-lg shadow-lg flex items-center justify-center">
                               <Smartphone size={12} className="text-gray-400" />
@@ -1419,6 +1483,12 @@ function App() {
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-medium">
                             <Monitor size={10} />
                             Desktop
+                          </span>
+                        )}
+                        {metadata.devices.includes('tablet') && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs font-medium">
+                            <Tablet size={10} />
+                            Tablet
                           </span>
                         )}
                         {metadata.devices.includes('mobile') && (
@@ -1466,7 +1536,7 @@ function App() {
         {currentStep === 3 && templateData && (
           <div className="customize-layout grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-8">
             {/* Show skeleton if images are still loading */}
-            {(!desktopSrc && !mobileSrc) || imagesLoading ? (
+            {(!desktopSrc && !tabletSrc && !mobileSrc) || imagesLoading ? (
               <>
                 {/* Skeleton Customization Panel - Hidden on mobile */}
                 <div className="skeleton-panel lg:col-span-1 space-y-6 hidden lg:block">

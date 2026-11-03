@@ -1,5 +1,7 @@
 [
   "desktop-mobile.json",
   "macbook-only.json",
-  "mobile-only.json"
+  "mobile-only.json",
+  "tablet-only.json",
+  "all-devices.json"
 ]

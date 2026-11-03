@@ -1,0 +1,63 @@
+{
+  "id": "tablet-only",
+  "name": "Tablet Only",
+  "description": "Clean flat-bezel tablet mockup for app and web showcases",
+  "previewImage": "/templates/previews/tablet-only.png",
+  "type": "showcase",
+  "tags": ["tablet", "ipad", "minimalist", "responsive"],
+  "canvas": {
+    "width": 1920,
+    "height": 1080
+  },
+  "devices": {
+    "desktop": {
+      "enabled": false
+    },
+    "tablet": {
+      "enabled": true,
+      "x": 675,
+      "y": 260,
+      "width": 570,
+      "height": 760,
+      "borderRadius": 36,
+      "shadow": true,
+      "crop": true,
+      "mockup": false,
+      "bezel": {
+        "color": "#111111",
+        "width": 28
+      }
+    },
+    "mobile": {
+      "enabled": false
+    }
+  },
+  "elements": [
+    {
+      "id": "title",
+      "type": "text",
+      "content": "Tablet App",
+      "x": 960,
+      "y": 64,
+      "fontSize": 57,
+      "fontFamily": "Aeonik",
+      "fontWeight": "bold",
+      "color": "#000000",
+      "textAlign": "center",
+      "maxWidth": 1200
+    },
+    {
+      "id": "subtitle",
+      "type": "text",
+      "content": "Adaptive & Elegant",
+      "x": 960,
+      "y": 136,
+      "fontSize": 30,
+      "fontFamily": "Aeonik",
+      "fontWeight": "normal",
+      "color": "#666666",
+      "textAlign": "center",
+      "maxWidth": 1000
+    }
+  ]
+}
