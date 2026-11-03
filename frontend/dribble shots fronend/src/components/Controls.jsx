@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Lock, LogOut, Edit2, Save, X, Plus, Trash2, Upload, RefreshCw } from 'lucide-react';
+import { Lock, LogOut, Edit2, Save, X, Plus, Trash2, Upload, RefreshCw, Loader2 } from 'lucide-react';
 import './Controls.css';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL;
@@ -18,6 +18,8 @@ function Controls() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [showLoginAttempt, setShowLoginAttempt] = useState(false);
   const [generatingImage, setGeneratingImage] = useState(false);
+  const [generateUrl, setGenerateUrl] = useState('');
+  const [generateError, setGenerateError] = useState('');
   const [rawScreenshot, setRawScreenshot] = useState(null);
   const [loadingScreenshot, setLoadingScreenshot] = useState(false);
   
@@ -48,11 +50,10 @@ function Controls() {
       const reader = new FileReader();
       reader.onloadend = () => {
         setRawScreenshot(reader.result);
-        console.log('✅ Admin: Web photo loaded from /public/photos');
       };
       reader.readAsDataURL(blob);
     } catch (err) {
-      console.error('❌ Admin: Failed to load web photo:', err);
+      console.error('Failed to load web photo:', err);
     } finally {
       setLoadingScreenshot(false);
     }
@@ -120,24 +121,26 @@ function Controls() {
       );
       
       setTemplates(loadedTemplates);
-      console.log('✅ Admin: Loaded templates:', loadedTemplates.length);
     } catch (err) {
-      console.error('❌ Admin: Failed to load templates:', err);
+      console.error('Failed to load templates:', err);
     }
   };
 
   const generateCacheImageFromURL = async () => {
+    const trimmed = generateUrl.trim();
+    if (!trimmed) {
+      setGenerateError('Enter a URL to generate a thumbnail from');
+      return;
+    }
+    const url = trimmed.startsWith('http') ? trimmed : `https://${trimmed}`;
+
+    setGenerateError('');
     setGeneratingImage(true);
     try {
-      // Use screenshot API to capture hamzaihsan.me
       const response = await fetch(`${API_BASE}/api/templates/generate-preview`, {
         method: 'POST',
         headers: adminHeaders(),
-        body: JSON.stringify({
-          url: 'https://hamzaihsan.me',
-          width: 640,
-          height: 360,
-        }),
+        body: JSON.stringify({ url, width: 640, height: 360 }),
       });
 
       if (!response.ok) {
@@ -147,9 +150,9 @@ function Controls() {
       const data = await response.json();
       setCacheImage(data.imageBase64);
       setCacheImagePreview(data.imageBase64);
-      console.log('✅ Admin: Cache image generated from hamzaihsan.me');
     } catch (err) {
-      console.error('❌ Admin: Failed to generate cache image:', err);
+      console.error('Failed to generate cache image:', err);
+      setGenerateError('Could not capture that URL. Using a placeholder instead.');
       // Fallback: generate a simple placeholder
       generatePlaceholderImage();
     } finally {
@@ -188,7 +191,6 @@ function Controls() {
       reader.onloadend = () => {
         setCacheImage(reader.result);
         setCacheImagePreview(reader.result);
-        console.log('✅ Admin: Placeholder image generated');
       };
       reader.readAsDataURL(blob);
     });
@@ -218,13 +220,34 @@ function Controls() {
     });
   };
 
-  // Draw a device with proper cropping (web or mobile)
+  // Draw a device with proper cropping (web, tablet, or mobile).
+  // Mirrors drawCanvas/drawSimpleDevice's device.bezel handling in App.jsx:
+  // when set, device.x/y/width/height are the OUTER frame bounds and the
+  // screenshot is inset by bezel.width on all sides.
   const drawPreviewDevice = async (ctx, screenshotImg, device, mockupImg = null) => {
     try {
+      const bezelWidth = device.bezel?.width || 0;
+      const bezelColor = device.bezel?.color || '#111111';
+
+      if (bezelWidth > 0) {
+        ctx.save();
+        if (device.shadow) {
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+          ctx.shadowBlur = 40;
+          ctx.shadowOffsetX = 0;
+          ctx.shadowOffsetY = 20;
+        }
+        ctx.fillStyle = bezelColor;
+        ctx.beginPath();
+        roundRect(ctx, device.x, device.y, device.width, device.height, device.borderRadius || 20);
+        ctx.fill();
+        ctx.restore();
+      }
+
       ctx.save();
 
-      // Draw shadow
-      if (device.shadow) {
+      // Draw shadow (mockup-image devices, or the no-bezel/no-mockup fallback)
+      if (device.shadow && bezelWidth === 0) {
         ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
         ctx.shadowBlur = 40;
         ctx.shadowOffsetX = 0;
@@ -238,20 +261,26 @@ function Controls() {
         const mockupY = mockupConfig.y !== undefined ? mockupConfig.y : device.y;
         const mockupWidth = mockupConfig.width !== undefined ? mockupConfig.width : device.width;
         const mockupHeight = mockupConfig.height !== undefined ? mockupConfig.height : device.height;
-        
+
         ctx.drawImage(mockupImg, mockupX, mockupY, mockupWidth, mockupHeight);
       }
 
+      const screenX = device.x + bezelWidth;
+      const screenY = device.y + bezelWidth;
+      const screenWidth = device.width - bezelWidth * 2;
+      const screenHeight = device.height - bezelWidth * 2;
+      const screenRadius = bezelWidth > 0 ? Math.max((device.borderRadius || 20) - bezelWidth * 0.6, 4) : (device.borderRadius || 20);
+
       // Clip to device area with rounded corners
       ctx.beginPath();
-      roundRect(ctx, device.x, device.y, device.width, device.height, device.borderRadius || 20);
+      roundRect(ctx, screenX, screenY, screenWidth, screenHeight, screenRadius);
       ctx.clip();
 
       // Crop the screenshot to fit device aspect ratio
       let sx = 0, sy = 0, sw = screenshotImg.width, sh = screenshotImg.height;
 
       const imgAspect = screenshotImg.width / screenshotImg.height;
-      const targetAspect = device.width / device.height;
+      const targetAspect = screenWidth / screenHeight;
 
       if (imgAspect > targetAspect) {
         // Image is wider - crop sides (center)
@@ -264,7 +293,7 @@ function Controls() {
       }
 
       // Draw the screenshot
-      ctx.drawImage(screenshotImg, sx, sy, sw, sh, device.x, device.y, device.width, device.height);
+      ctx.drawImage(screenshotImg, sx, sy, sw, sh, screenX, screenY, screenWidth, screenHeight);
       ctx.restore();
     } catch (err) {
       console.error('Error drawing device:', err);
@@ -331,11 +360,6 @@ function Controls() {
   // Main preview render function
   const renderPreviewCanvas = async () => {
     if (!previewCanvasRef.current || !editingTemplate || !rawScreenshot) {
-      console.log('Skipping preview render:', {
-        canvas: !!previewCanvasRef.current,
-        template: !!editingTemplate,
-        screenshot: !!rawScreenshot
-      });
       return;
     }
 
@@ -365,6 +389,7 @@ function Controls() {
 
       // Load mockup images if needed
       let desktopMockupImg = null;
+      let tabletMockupImg = null;
       let mobileMockupImg = null;
 
       if (template.devices?.desktop?.enabled && template.devices.desktop.mockupImage) {
@@ -372,6 +397,14 @@ function Controls() {
           desktopMockupImg = await loadImage(template.devices.desktop.mockupImage);
         } catch (err) {
           console.warn('Desktop mockup not available:', err);
+        }
+      }
+
+      if (template.devices?.tablet?.enabled && template.devices.tablet.mockupImage) {
+        try {
+          tabletMockupImg = await loadImage(template.devices.tablet.mockupImage);
+        } catch (err) {
+          console.warn('Tablet mockup not available:', err);
         }
       }
 
@@ -388,6 +421,12 @@ function Controls() {
         await drawPreviewDevice(ctx, webImg, template.devices.desktop, desktopMockupImg);
       }
 
+      // Draw tablet device — no dedicated sample tablet screenshot exists for
+      // the admin editor, so the mobile sample photo stands in here.
+      if (template.devices?.tablet?.enabled && mobileImg) {
+        await drawPreviewDevice(ctx, mobileImg, template.devices.tablet, tabletMockupImg);
+      }
+
       // Draw mobile device with mobile photo
       if (template.devices?.mobile?.enabled && mobileImg) {
         await drawPreviewDevice(ctx, mobileImg, template.devices.mobile, mobileMockupImg);
@@ -402,9 +441,8 @@ function Controls() {
         });
       }
 
-      console.log('✅ Admin: Preview canvas rendered');
     } catch (err) {
-      console.error('❌ Admin: Failed to render preview:', err);
+      console.error('Failed to render preview:', err);
     } finally {
       setPreviewLoading(false);
     }
@@ -504,10 +542,9 @@ function Controls() {
       setTimeout(() => setSaveSuccess(false), 3000);
 
       await loadTemplates();
-      console.log('✅ Admin: Template saved to backend:', selectedTemplate.filename);
     } catch (err) {
       setJsonError('Error saving template: ' + err.message);
-      console.error('❌ Admin: Save error:', err);
+      console.error('Save error:', err);
     }
   };
 
@@ -535,10 +572,9 @@ function Controls() {
       setEditingTemplate(null);
       setTemplateJSON('');
       loadTemplates();
-      console.log('✅ Admin: Template deleted');
     } catch (err) {
       setJsonError('Error deleting template: ' + err.message);
-      console.error('❌ Admin: Delete error:', err);
+      console.error('Delete error:', err);
     }
   };
 
@@ -573,6 +609,9 @@ function Controls() {
             height: 876,
           },
         },
+        tablet: {
+          enabled: false,
+        },
         mobile: {
           enabled: false,
         },
@@ -581,7 +620,7 @@ function Controls() {
         {
           id: 'title',
           type: 'text',
-          content: 'Hamza Ihsan',
+          content: 'Website Title',
           x: 300,
           y: 100,
           fontSize: 48,
@@ -594,7 +633,7 @@ function Controls() {
         {
           id: 'url',
           type: 'text',
-          content: 'hamzaihsan.me',
+          content: 'example.com',
           x: 300,
           y: 170,
           fontSize: 24,
@@ -757,6 +796,9 @@ function Controls() {
                           {editingTemplate.devices?.desktop?.enabled && (
                             <span className="device-tag desktop">Desktop</span>
                           )}
+                          {editingTemplate.devices?.tablet?.enabled && (
+                            <span className="device-tag tablet">Tablet</span>
+                          )}
                           {editingTemplate.devices?.mobile?.enabled && (
                             <span className="device-tag mobile">Mobile</span>
                           )}
@@ -764,7 +806,52 @@ function Controls() {
                       </div>
                      </div>
 
+                     {/* Thumbnail Image - generate from a live URL, upload a file, or capture the canvas preview below */}
+                     <div className="cache-image-section">
+                       <div className="cache-section-header">
+                         <label>Thumbnail Image</label>
+                         <div className="cache-actions">
+                           <input
+                             type="text"
+                             value={generateUrl}
+                             onChange={(e) => setGenerateUrl(e.target.value)}
+                             placeholder="https://example.com"
+                             className="generate-url-input"
+                           />
+                           <button
+                             onClick={generateCacheImageFromURL}
+                             disabled={generatingImage}
+                             className="btn-small btn-generate"
+                             title="Capture this URL and use it as the thumbnail"
+                           >
+                             {generatingImage ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
+                             Generate from URL
+                           </button>
+                           <label className="btn-small btn-upload" title="Upload an image to use as the thumbnail">
+                             <Upload size={14} />
+                             Upload
+                             <input
+                               type="file"
+                               accept="image/*"
+                               className="file-input"
+                               onChange={handleCacheImageUpload}
+                             />
+                           </label>
+                         </div>
+                       </div>
+                       {generateError && <p className="cache-hint">{generateError}</p>}
+                       {cacheImagePreview && (
+                         <div className="raw-screenshot-preview">
+                           <img src={cacheImagePreview} alt="Thumbnail preview" />
+                           <p className="screenshot-label">Current thumbnail — will be saved with this template</p>
+                         </div>
+                       )}
+                     </div>
+
                      {/* Canvas Preview - Full Template Rendering */}
+                     {loadingScreenshot && !rawScreenshot && (
+                       <div className="screenshot-loading">Loading sample screenshot…</div>
+                     )}
                      {rawScreenshot && editingTemplate && (
                        <div className="canvas-preview-section">
                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -775,7 +862,6 @@ function Controls() {
                                  const canvasImage = previewCanvasRef.current.toDataURL('image/png');
                                  setCacheImage(canvasImage);
                                  setCacheImagePreview(canvasImage);
-                                 console.log('✅ Admin: Canvas preview set as thumbnail');
                                }
                              }}
                              className="btn-small btn-save-cache"

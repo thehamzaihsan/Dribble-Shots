@@ -440,6 +440,11 @@
   color: #1e40af;
 }
 
+.device-tag.tablet {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
 .device-tag.mobile {
   background: #dcfce7;
   color: #166534;
@@ -458,64 +463,8 @@
   gap: 8px;
 }
 
-.cache-section-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.cache-section-header label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #666;
-}
-
-.cache-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.btn-small {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
-  font-size: 11px;
-  font-weight: 500;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: white;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  white-space: nowrap;
-}
-
-.btn-small:hover:not(:disabled) {
-  border-color: #667eea;
-  background: #f9f9ff;
-  color: #667eea;
-}
-
-.btn-small:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-generate {
-  color: #667eea;
-}
-
 .btn-save-cache {
   color: #22c55e;
-}
-
-.btn-upload {
-  color: #f59e0b;
-}
-
-.file-input {
-  display: none;
 }
 
 .raw-screenshot-preview {
@@ -674,6 +623,16 @@
   animation: slideIn 0.3s ease;
 }
 
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes slideIn {
   from {
     opacity: 0;
@@ -749,6 +708,21 @@
 .cache-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.generate-url-input {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.generate-url-input:focus {
+  outline: none;
+  border-color: #667eea;
 }
 
 .btn-small {
@@ -778,13 +752,13 @@
   cursor: not-allowed;
 }
 
-.btn-upload {
+label.btn-upload {
   background: #10b981;
   color: white;
   position: relative;
 }
 
-.btn-upload:hover {
+label.btn-upload:hover {
   background: #059669;
 }
 
