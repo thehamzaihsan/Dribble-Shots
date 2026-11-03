@@ -2,6 +2,7 @@ import os
 import sys
 import asyncio
 import base64
+import json
 import uuid
 import hashlib
 import logging
@@ -9,6 +10,7 @@ import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from enum import Enum
+from pathlib import Path
 from typing import Optional, Dict
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, Response, Request, Header, Depends
@@ -61,12 +63,13 @@ def rate_limit(bucket: str, limit: int, window: float = 60.0):
 
 # Cache system for screenshots (valid for 1 hour)
 class CacheEntry:
-    def __init__(self, desktop_base64: str, mobile_base64: str, page_title: str = ""):
+    def __init__(self, desktop_base64: str, mobile_base64: str, tablet_base64: str, page_title: str = ""):
         self.desktop_base64 = desktop_base64
         self.mobile_base64 = mobile_base64
+        self.tablet_base64 = tablet_base64
         self.page_title = page_title
         self.timestamp = datetime.now()
-    
+
     def is_expired(self) -> bool:
         """Check if cache entry is older than 1 hour"""
         return datetime.now() - self.timestamp > timedelta(hours=1)
@@ -81,7 +84,7 @@ def get_cache_key(url: str, scroll_to_bottom: bool) -> str:
 def get_from_cache(url: str, scroll_to_bottom: bool) -> Optional[Dict]:
     """Try to get screenshot from cache"""
     cache_key = get_cache_key(url, scroll_to_bottom)
-    
+
     if cache_key in screenshot_cache:
         entry = screenshot_cache[cache_key]
         if not entry.is_expired():
@@ -89,20 +92,21 @@ def get_from_cache(url: str, scroll_to_bottom: bool) -> Optional[Dict]:
             return {
                 "desktop": entry.desktop_base64,
                 "mobile": entry.mobile_base64,
+                "tablet": entry.tablet_base64,
                 "title": entry.page_title
             }
         else:
             # Remove expired entry
             logger.info(f"🗑️  Cache expired for {url}, removing...")
             del screenshot_cache[cache_key]
-    
+
     logger.info(f"Cache miss for {url}")
     return None
 
-def save_to_cache(url: str, scroll_to_bottom: bool, desktop_base64: str, mobile_base64: str, page_title: str = ""):
+def save_to_cache(url: str, scroll_to_bottom: bool, desktop_base64: str, mobile_base64: str, tablet_base64: str, page_title: str = ""):
     """Save screenshot to cache"""
     cache_key = get_cache_key(url, scroll_to_bottom)
-    screenshot_cache[cache_key] = CacheEntry(desktop_base64, mobile_base64, page_title)
+    screenshot_cache[cache_key] = CacheEntry(desktop_base64, mobile_base64, tablet_base64, page_title)
     logger.info(f"💾 Cached screenshot for {url} (total cached: {len(screenshot_cache)})")
 
 # Queue system
@@ -448,7 +452,53 @@ async def capture_mobile(url: str, scroll_to_bottom: bool) -> tuple[bytes, str]:
         return mobile_bytes, base64.b64encode(mobile_bytes).decode('utf-8')
     finally:
         await mobile_context.close()
- 
+
+async def capture_tablet(url: str, scroll_to_bottom: bool) -> tuple[bytes, str]:
+    """Capture tablet screenshot"""
+    logger.info("📟 Creating tablet context...")
+    tablet_context = await browser.new_context(
+        viewport={"width": 810, "height": 1080},
+        device_scale_factor=2,
+        user_agent="Mozilla/5.0 (iPad; CPU OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+        has_touch=True,
+        is_mobile=True
+    )
+
+    await tablet_context.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+        });
+    """)
+
+    try:
+        tablet_page = await tablet_context.new_page()
+        logger.info(f"🌐 Navigating to {url} (tablet)...")
+        await tablet_page.goto(url, wait_until="domcontentloaded", timeout=60000)
+
+        if scroll_to_bottom:
+            await scroll_to_percentage(tablet_page, 0.5)  # Scroll to 50%
+        else:
+            await asyncio.sleep(0.5)  # Reduced from 2 to 0.5
+
+        # Get page height and calculate 50% clip
+        page_height = await tablet_page.evaluate("document.documentElement.scrollHeight")
+        clip_height = int(page_height * 0.5)
+
+        # Ensure minimum height for tablet
+        clip_height = max(clip_height, 1080)  # At least viewport height
+
+        logger.info(f"📷 Taking tablet screenshot (first 50%: {clip_height}px of {page_height}px)...")
+        tablet_bytes = await tablet_page.screenshot(
+            type="jpeg",
+            quality=85,
+            clip={"x": 0, "y": 0, "width": 810, "height": min(clip_height, page_height)},
+        )
+        logger.info(f"   ✅ Tablet screenshot captured: {len(tablet_bytes)} bytes")
+
+        return tablet_bytes, base64.b64encode(tablet_bytes).decode('utf-8')
+    finally:
+        await tablet_context.close()
+
 
 @app.get("/screenshot", dependencies=[Depends(rate_limit("screenshot", limit=10, window=60))])
 async def screenshot(url: str):
@@ -542,27 +592,30 @@ async def process_capture(url: str, scroll_to_bottom: bool, use_cache: bool = Tr
         raise error
 
     try:
-        # ⚡ PARALLEL CAPTURE - Desktop and Mobile simultaneously
-        logger.info("🚀 Starting parallel desktop + mobile capture...")
+        # ⚡ PARALLEL CAPTURE - Desktop, Tablet, and Mobile simultaneously
+        logger.info("🚀 Starting parallel desktop + tablet + mobile capture...")
 
-        desktop_result, mobile_result = await asyncio.gather(
+        desktop_result, tablet_result, mobile_result = await asyncio.gather(
             capture_desktop(url, scroll_to_bottom),
+            capture_tablet(url, scroll_to_bottom),
             capture_mobile(url, scroll_to_bottom)
         )
 
         desktop_bytes, desktop_base64, page_title = desktop_result
+        tablet_bytes, tablet_base64 = tablet_result
         mobile_bytes, mobile_base64 = mobile_result
 
-        logger.info(f"✅ Success! Desktop: {len(desktop_bytes)} bytes, Mobile: {len(mobile_bytes)} bytes")
+        logger.info(f"✅ Success! Desktop: {len(desktop_bytes)} bytes, Tablet: {len(tablet_bytes)} bytes, Mobile: {len(mobile_bytes)} bytes")
         logger.info(f"📝 Website title: {page_title}")
 
         # Always save to cache (replace existing if any)
-        save_to_cache(url, scroll_to_bottom, desktop_base64, mobile_base64, page_title)
+        save_to_cache(url, scroll_to_bottom, desktop_base64, mobile_base64, tablet_base64, page_title)
         logger.info(f"💾 Cache updated/replaced for {url}")
 
         result = {
             "desktop": desktop_base64,
             "mobile": mobile_base64,
+            "tablet": tablet_base64,
             "title": page_title
         }
         if future is not None:
@@ -658,11 +711,6 @@ async def screenshot_both(url: str):
 # ============================================
 # Template Management API
 # ============================================
-
-import os
-import json
-import base64
-from pathlib import Path
 
 # Get the absolute path to templates directory
 BACKEND_DIR = Path(__file__).parent
