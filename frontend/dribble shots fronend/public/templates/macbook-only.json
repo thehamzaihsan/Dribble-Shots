@@ -13,7 +13,7 @@
     "desktop": {
       "enabled": true,
       "x": 385,
-      "y": 155,
+      "y": 220,
       "width": 1150,
       "height": 770,
       "borderRadius": 20,
@@ -23,7 +23,7 @@
       "mockupImage": "/Desktop.png",
       "mockupConfig": {
         "x": 239,
-        "y": 126,
+        "y": 191,
         "width": 1445,
         "height": 876
       }

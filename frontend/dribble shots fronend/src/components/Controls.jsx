@@ -281,10 +281,16 @@ function Controls() {
 
       const maxWidth = element.maxWidth || 1000;
       const lineHeight = (element.fontSize || 24) * 1.5;
-      let y = element.y || 0;
+      const y = element.y || 0;
+      // Elements are positioned independently (e.g. a subtitle fixed below a
+      // title), so unbounded wrapping can push a long line into the next
+      // element. Default to a single line and truncate with an ellipsis,
+      // mirroring the main canvas renderer in App.jsx.
+      const maxLines = element.maxLines || 1;
 
       if (element.content) {
         const words = element.content.split(' ');
+        const lines = [];
         let line = '';
 
         words.forEach((word) => {
@@ -292,17 +298,28 @@ function Controls() {
           const metrics = ctx.measureText(testLine);
 
           if (metrics.width > maxWidth && line) {
-            ctx.fillText(line, element.x || 0, y);
+            lines.push(line);
             line = word;
-            y += lineHeight;
           } else {
             line = testLine;
           }
         });
+        if (line) lines.push(line);
 
-        if (line) {
-          ctx.fillText(line, element.x || 0, y);
+        const truncated = lines.length > maxLines;
+        if (truncated) lines.length = maxLines;
+
+        let lastLine = lines[lines.length - 1] || '';
+        if (truncated || ctx.measureText(lastLine).width > maxWidth) {
+          while (lastLine.length > 0 && ctx.measureText(`${lastLine}…`).width > maxWidth) {
+            lastLine = lastLine.slice(0, -1).trimEnd();
+          }
+          lines[lines.length - 1] = lastLine ? `${lastLine}…` : '…';
         }
+
+        lines.forEach((l, i) => {
+          ctx.fillText(l, element.x || 0, y + i * lineHeight);
+        });
       }
 
       ctx.restore();

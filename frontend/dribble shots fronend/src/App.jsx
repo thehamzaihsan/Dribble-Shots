@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Link2, Download, Palette, Type, CheckCircle2, ArrowRight, ArrowLeft, Loader2, RefreshCw, Sparkles, Zap, Layers, MousePointer, Monitor, Smartphone, Globe, Play, Search, X, Filter } from 'lucide-react';
+import { Upload, Link2, Download, Type, CheckCircle2, ArrowRight, ArrowLeft, Loader2, Layers, Monitor, Smartphone, Search, X } from 'lucide-react';
 import { HexColorPicker } from 'react-colorful';
 import './App.css';
 
@@ -12,8 +12,6 @@ function App() {
   // Step 1: Input
   const [inputMethod, setInputMethod] = useState('url'); // 'url' or 'upload'
   const [url, setUrl] = useState('');
-  const [uploadedDesktop, setUploadedDesktop] = useState(null);
-  const [uploadedMobile, setUploadedMobile] = useState(null);
   const [scrollToBottom, setScrollToBottom] = useState(false);
   const [useCache, setUseCache] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -22,8 +20,7 @@ function App() {
   const [error, setError] = useState(null);
   const [imagesLoading, setImagesLoading] = useState(false);
   const [queuePosition, setQueuePosition] = useState(0);
-  const [jobId, setJobId] = useState(null);
-  
+
   // Screenshots from backend
   const [desktopSrc, setDesktopSrc] = useState(null);
   const [mobileSrc, setMobileSrc] = useState(null);
@@ -31,7 +28,8 @@ function App() {
   
   // Step 2: Templates
   const [templates, setTemplates] = useState([]);
-  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState(null);
   const [templateData, setTemplateData] = useState(null);
   const [templateSearch, setTemplateSearch] = useState('');
   const [templateFilters, setTemplateFilters] = useState({
@@ -56,7 +54,6 @@ function App() {
   const [extractedColors, setExtractedColors] = useState([]);
   
   const canvasRef = useRef(null);
-  const colorExtractorRef = useRef(null);
   const pollIntervalRef = useRef(null);
   
   const availableFonts = [
@@ -300,19 +297,9 @@ function App() {
     };
   }, []);
 
-  // Log templates when loaded
-  useEffect(() => {
-    if (templates.length > 0) {
-      console.log('✅ Templates state updated:', templates.length, 'templates');
-    } else {
-      console.log('⚠️ Templates state is empty');
-    }
-  }, [templates]);
-
   // Reload templates when entering step 2
   useEffect(() => {
     if (currentStep === 2 && templates.length === 0) {
-      console.log('📋 Step 2 entered but no templates, reloading...');
       loadTemplates();
     }
   }, [currentStep]);
@@ -358,64 +345,37 @@ function App() {
   }, [templateData, desktopSrc, mobileSrc, bgColor, bgColor2, useGradient, gradientDirection, textColor, fontFamily, enableShadow, enableMockups, textContents, currentStep]);
 
   const loadTemplates = async () => {
+    setTemplatesLoading(true);
+    setTemplatesError(null);
     try {
-      console.log('📋 Loading templates...');
       const indexRes = await fetch(`/templates/index.json?t=${Date.now()}`);
-      
+
       if (!indexRes.ok) {
         throw new Error(`Failed to load index: ${indexRes.status}`);
       }
-      
+
       const templateFiles = await indexRes.json();
-      console.log('📄 Template files:', templateFiles);
-      
+
       const loadedTemplates = await Promise.all(
         templateFiles.map(async (file) => {
-          console.log(`📥 Loading template: ${file}`);
           const res = await fetch(`/templates/${file}?t=${Date.now()}`);
-          
+
           if (!res.ok) {
             throw new Error(`Failed to load ${file}: ${res.status}`);
           }
-          
-          const template = await res.json();
-          console.log(`✅ Loaded template: ${template.id}`);
-          return template;
+
+          return res.json();
         })
       );
-      
-      console.log('🎉 All templates loaded:', loadedTemplates.length);
+
       setTemplates(loadedTemplates);
       return loadedTemplates;
     } catch (err) {
-      console.error('❌ Failed to load templates:', err);
-      console.error('Stack:', err.stack);
+      console.error('Failed to load templates:', err);
+      setTemplatesError('Could not load templates. Check your connection and try again.');
       return [];
-    }
-  };
-
-  const refreshTemplate = async () => {
-    if (!selectedTemplate) return;
-    
-    try {
-      // Reload template from file
-      const res = await fetch(`/templates/${selectedTemplate}.json?t=${Date.now()}`);
-      const freshTemplate = await res.json();
-      
-      setTemplateData(freshTemplate);
-      
-      // Reinitialize text contents
-      const initialTexts = {};
-      freshTemplate.elements.forEach(el => {
-        if (el.type === 'text') {
-          initialTexts[el.id] = textContents[el.id] || el.content;
-        }
-      });
-      setTextContents(initialTexts);
-      
-      console.log('Template refreshed:', freshTemplate);
-    } catch (err) {
-      console.error('Failed to refresh template:', err);
+    } finally {
+      setTemplatesLoading(false);
     }
   };
 
@@ -430,16 +390,19 @@ function App() {
     setLoadingMessage('Submitting request to queue...');
     setError(null);
     setQueuePosition(0);
-    setJobId(null);
 
     const API_BASE = import.meta.env.VITE_API_BASE_URL;
+    // Most captures finish in a few seconds; if a job is still running after
+    // this many polls, something is stuck server-side — stop spinning forever
+    // and let the user know instead of leaving them staring at a progress bar.
+    const MAX_POLL_ATTEMPTS = 80; // 80 * 1.5s = 2 minutes
 
     try {
       // Submit job to queue
       const queueResponse = await fetch(`${API_BASE}/capture/queue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           url: url.trim(),
           scroll_to_bottom: scrollToBottom,
           use_cache: useCache
@@ -453,15 +416,20 @@ function App() {
       const queueData = await queueResponse.json();
       const currentJobId = queueData.job_id;
       const initialPosition = queueData.queue_position;
-      
-      setJobId(currentJobId);
+
       setQueuePosition(initialPosition);
       setLoadingMessage(`Queued at position ${initialPosition}...`);
       setLoadingProgress(10);
 
       // Poll for job status
+      let pollAttempts = 0;
       pollIntervalRef.current = setInterval(async () => {
         try {
+          pollAttempts += 1;
+          if (pollAttempts > MAX_POLL_ATTEMPTS) {
+            throw new Error('This is taking longer than expected. Please try again.');
+          }
+
           const statusResponse = await fetch(`${API_BASE}/capture/status/${currentJobId}`);
 
           if (!statusResponse.ok) {
@@ -501,7 +469,6 @@ function App() {
             setTimeout(() => {
               setCurrentStep(2); // Move to template selection
               setLoading(false);
-              setJobId(null);
             }, 300);
 
           } else if (statusData.status === 'failed') {
@@ -516,17 +483,15 @@ function App() {
           setLoading(false);
           setLoadingProgress(0);
           setQueuePosition(0);
-          setJobId(null);
         }
       }, 1500); // Poll every 1.5s — most captures finish in 1-3s, so a 10s
       // interval meant waiting up to 10s after the job was already done
-      
+
     } catch (err) {
       setError(err.message);
       setLoading(false);
       setLoadingProgress(0);
       setQueuePosition(0);
-      setJobId(null);
     }
   };
 
@@ -537,10 +502,8 @@ function App() {
     const reader = new FileReader();
     reader.onload = (event) => {
       if (type === 'desktop') {
-        setUploadedDesktop(event.target.result);
         setDesktopSrc(event.target.result);
       } else {
-        setUploadedMobile(event.target.result);
         setMobileSrc(event.target.result);
       }
     };
@@ -556,7 +519,6 @@ function App() {
   };
 
   const handleTemplateSelect = (template) => {
-    setSelectedTemplate(template.id);
     setTemplateData(template);
     setEnableShadow(template.devices.desktop.shadow || template.devices.mobile?.shadow || false);
     
@@ -661,13 +623,9 @@ function App() {
     // Helper to load an image as a promise
     const loadImage = (src) => {
       return new Promise((resolve, reject) => {
-        console.log('Loading image:', src);
         const img = new Image();
         img.crossOrigin = 'anonymous';
-        img.onload = () => {
-          console.log('Image loaded successfully:', src, img.width, 'x', img.height);
-          resolve(img);
-        };
+        img.onload = () => resolve(img);
         img.onerror = (err) => {
           console.error('Failed to load image:', src, err);
           reject(err);
@@ -678,33 +636,19 @@ function App() {
 
     // Load all images first
     const imagesToLoad = [];
-    
-    console.log('=== IMAGE LOADING DEBUG ===');
-    console.log('desktopSrc:', desktopSrc ? desktopSrc.substring(0, 50) + '...' : null);
-    console.log('mobileSrc:', mobileSrc ? mobileSrc.substring(0, 50) + '...' : null);
-    console.log('templateData.devices:', templateData.devices);
-    console.log('enableMockups:', enableMockups);
-    
+
     if (templateData.devices?.desktop?.enabled && desktopSrc) {
-      console.log('Adding desktop screenshot to load queue');
       imagesToLoad.push(loadImage(desktopSrc).then(img => ({ type: 'desktop', img })));
       if (enableMockups && templateData.devices.desktop.mockupImage) {
-        console.log('Adding desktop mockup to load queue:', templateData.devices.desktop.mockupImage);
         imagesToLoad.push(loadImage(templateData.devices.desktop.mockupImage).then(img => ({ type: 'desktopMockup', img })));
       }
-    } else {
-      console.log('Desktop NOT added:', { enabled: templateData.devices?.desktop?.enabled, hasDesktopSrc: !!desktopSrc });
     }
-    
+
     if (templateData.devices?.mobile?.enabled && mobileSrc) {
-      console.log('Adding mobile screenshot to load queue');
       imagesToLoad.push(loadImage(mobileSrc).then(img => ({ type: 'mobile', img })));
       if (enableMockups && templateData.devices.mobile.mockupImage) {
-        console.log('Adding mobile mockup to load queue:', templateData.devices.mobile.mockupImage);
         imagesToLoad.push(loadImage(templateData.devices.mobile.mockupImage).then(img => ({ type: 'mobileMockup', img })));
       }
-    } else {
-      console.log('Mobile NOT added:', { enabled: templateData.devices?.mobile?.enabled, hasMobileSrc: !!mobileSrc });
     }
 
     // Load extra device mockups
@@ -716,75 +660,56 @@ function App() {
       });
     }
 
-    try {
-      console.log('Loading images...', imagesToLoad.length, 'images to load');
-      const loadedImages = await Promise.all(imagesToLoad);
-      const images = {};
-      loadedImages.forEach(({ type, img }) => {
-        images[type] = img;
-        console.log(`Loaded ${type}: ${img.width}x${img.height}`);
-      });
-
-      // Now draw everything
-      console.log('Drawing canvas...', { desktopSrc: !!desktopSrc, mobileSrc: !!mobileSrc, images: Object.keys(images) });
-      drawBackground();
-
-      // Draw desktop device
-      if (templateData.devices?.desktop?.enabled && desktopSrc && images.desktop) {
-        console.log('Drawing desktop device', { enableMockups, hasMockupImage: !!templateData.devices.desktop.mockupImage, hasMockupImg: !!images.desktopMockup });
-        const device = templateData.devices.desktop;
-        if (enableMockups && device.mockupImage && images.desktopMockup) {
-          drawDeviceWithMockupImageSync(ctx, images.desktop, images.desktopMockup, device);
-        } else {
-          drawSimpleDevice(ctx, images.desktop, device);
-        }
-      } else {
-        console.log('Skipping desktop device', { enabled: templateData.devices?.desktop?.enabled, hasDesktopSrc: !!desktopSrc, hasImage: !!images.desktop });
+    // Use allSettled rather than all: a single broken asset (e.g. a missing
+    // mockup PNG) shouldn't blank out screenshots that loaded successfully.
+    const settledImages = await Promise.allSettled(imagesToLoad);
+    const images = {};
+    settledImages.forEach((result) => {
+      if (result.status === 'fulfilled') {
+        images[result.value.type] = result.value.img;
       }
+    });
 
-      // Draw mobile device
-      if (templateData.devices?.mobile?.enabled && mobileSrc && images.mobile) {
-        console.log('Drawing mobile device', { enableMockups, hasMockupImage: !!templateData.devices.mobile.mockupImage, hasMockupImg: !!images.mobileMockup });
-        const device = templateData.devices.mobile;
-        if (enableMockups && device.mockupImage && images.mobileMockup) {
-          drawDeviceWithMockupImageSync(ctx, images.mobile, images.mobileMockup, device);
+    drawBackground();
+
+    // Draw desktop device
+    if (templateData.devices?.desktop?.enabled && desktopSrc && images.desktop) {
+      const device = templateData.devices.desktop;
+      if (enableMockups && device.mockupImage && images.desktopMockup) {
+        drawDeviceWithMockupImageSync(ctx, images.desktop, images.desktopMockup, device);
+      } else {
+        drawSimpleDevice(ctx, images.desktop, device);
+      }
+    }
+
+    // Draw mobile device
+    if (templateData.devices?.mobile?.enabled && mobileSrc && images.mobile) {
+      const device = templateData.devices.mobile;
+      if (enableMockups && device.mockupImage && images.mobileMockup) {
+        drawDeviceWithMockupImageSync(ctx, images.mobile, images.mobileMockup, device);
+      } else {
+        drawSimpleDevice(ctx, images.mobile, device);
+      }
+    }
+
+    // Draw extra devices
+    if (templateData.extraDevices && mobileSrc && images.mobile) {
+      templateData.extraDevices.forEach((device, index) => {
+        if (enableMockups && device.mockupImage && images[`extraMockup${index}`]) {
+          drawDeviceWithMockupImageSync(ctx, images.mobile, images[`extraMockup${index}`], device);
         } else {
           drawSimpleDevice(ctx, images.mobile, device);
         }
-      } else {
-        console.log('Skipping mobile device', { enabled: templateData.devices?.mobile?.enabled, hasMobileSrc: !!mobileSrc, hasImage: !!images.mobile });
-      }
+      });
+    }
 
-      // Draw extra devices
-      if (templateData.extraDevices && mobileSrc && images.mobile) {
-        templateData.extraDevices.forEach((device, index) => {
-          if (enableMockups && device.mockupImage && images[`extraMockup${index}`]) {
-            drawDeviceWithMockupImageSync(ctx, images.mobile, images[`extraMockup${index}`], device);
-          } else {
-            drawSimpleDevice(ctx, images.mobile, device);
-          }
-        });
-      }
-
-      // Draw text elements
-      if (templateData.elements) {
-        templateData.elements.forEach(element => {
-          if (element.type === 'text') {
-            drawText(ctx, element);
-          }
-        });
-      }
-    } catch (err) {
-      console.error('Error loading images:', err);
-      // Still draw background and text even if images fail
-      drawBackground();
-      if (templateData.elements) {
-        templateData.elements.forEach(element => {
-          if (element.type === 'text') {
-            drawText(ctx, element);
-          }
-        });
-      }
+    // Draw text elements
+    if (templateData.elements) {
+      templateData.elements.forEach(element => {
+        if (element.type === 'text') {
+          drawText(ctx, element);
+        }
+      });
     }
   };
 
@@ -802,13 +727,6 @@ function App() {
     const screenY = device.y;
     const screenWidth = device.width;
     const screenHeight = device.height;
-
-    console.log('drawDeviceWithMockupImageSync:', { 
-      mockup: { x: mockupX, y: mockupY, w: mockupWidth, h: mockupHeight },
-      screen: { x: screenX, y: screenY, w: screenWidth, h: screenHeight },
-      screenshotSize: { w: screenshotImg.width, h: screenshotImg.height },
-      mockupSize: { w: mockupImg.width, h: mockupImg.height }
-    });
 
     // Check if cropping is enabled (default true)
     const cropEnabled = device.crop !== false;
@@ -831,8 +749,6 @@ function App() {
         sy = 0; // Crop from top
       }
     }
-
-    console.log('Screenshot crop:', { sx, sy, sw, sh });
 
     // STEP 1: Draw shadow using composite operation
     if (enableShadow && device.shadow) {
@@ -859,8 +775,6 @@ function App() {
     ctx.clip();
     ctx.drawImage(screenshotImg, sx, sy, sw, sh, screenX, screenY, screenWidth, screenHeight);
     ctx.restore();
-    
-    console.log('Finished drawing device with mockup');
   };
 
   const drawSimpleDevice = (ctx, img, device) => {
@@ -931,26 +845,45 @@ function App() {
     ctx.textAlign = element.textAlign;
     ctx.textBaseline = 'top';
 
-    // Handle text wrapping
-    const words = content.split(' ');
-    let line = '';
-    let y = element.y;
-    const lineHeight = element.fontSize * 1.2;
     const maxWidth = element.maxWidth || templateData.canvas.width;
+    // Elements are positioned independently (e.g. a subtitle fixed below a
+    // title), so unbounded wrapping can push a long line into the next
+    // element. Default to a single line and truncate with an ellipsis;
+    // templates can opt into more lines via maxLines when nothing sits below.
+    const maxLines = element.maxLines || 1;
+    const lineHeight = element.fontSize * 1.2;
 
-    words.forEach((word, index) => {
-      const testLine = line + word + ' ';
-      const metrics = ctx.measureText(testLine);
-
-      if (metrics.width > maxWidth && index > 0) {
-        ctx.fillText(line, element.x, y);
-        line = word + ' ';
-        y += lineHeight;
+    // Wrap the full content into lines first (unbounded)
+    const words = content.split(' ');
+    const lines = [];
+    let line = '';
+    words.forEach((word) => {
+      const testLine = line ? `${line} ${word}` : word;
+      if (line && ctx.measureText(testLine).width > maxWidth) {
+        lines.push(line);
+        line = word;
       } else {
         line = testLine;
       }
     });
-    ctx.fillText(line, element.x, y);
+    if (line) lines.push(line);
+
+    // Cap to maxLines, adding an ellipsis if content was cut off or if the
+    // last line still overflows on its own (e.g. a single unbreakable word)
+    const truncated = lines.length > maxLines;
+    if (truncated) lines.length = maxLines;
+
+    let lastLine = lines[lines.length - 1] || '';
+    if (truncated || ctx.measureText(lastLine).width > maxWidth) {
+      while (lastLine.length > 0 && ctx.measureText(`${lastLine}…`).width > maxWidth) {
+        lastLine = lastLine.slice(0, -1).trimEnd();
+      }
+      lines[lines.length - 1] = lastLine ? `${lastLine}…` : '…';
+    }
+
+    lines.forEach((l, i) => {
+      ctx.fillText(l, element.x, element.y + i * lineHeight);
+    });
 
     ctx.restore();
   };
@@ -972,14 +905,24 @@ function App() {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    canvas.toBlob((blob) => {
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `portfolio-shot-${Date.now()}.png`;
-      link.click();
-      URL.revokeObjectURL(url);
-    });
+    setError(null);
+    try {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          setError('Could not export the image. Try a different screenshot or template.');
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `portfolio-shot-${Date.now()}.png`;
+        link.click();
+        URL.revokeObjectURL(url);
+      });
+    } catch (err) {
+      console.error('Failed to export canvas:', err);
+      setError('Could not export the image. Try a different screenshot or template.');
+    }
   };
 
   const handleTextChange = (elementId, value) => {
@@ -992,12 +935,9 @@ function App() {
   const resetAll = () => {
     setCurrentStep(1);
     setUrl('');
-    setUploadedDesktop(null);
-    setUploadedMobile(null);
     setDesktopSrc(null);
     setMobileSrc(null);
     setWebsiteTitle('');
-    setSelectedTemplate(null);
     setTemplateData(null);
     setScrollToBottom(false);
     setError(null);
@@ -1005,7 +945,6 @@ function App() {
     setLoadingMessage('');
     setImagesLoading(false);
     setQueuePosition(0);
-    setJobId(null);
     setBgColor('#ffffff');
     setBgColor2('#8b5cf6');
     setUseGradient(false);
@@ -1370,6 +1309,24 @@ function App() {
                   No Text
                 </button>
 
+                {/* Type Filters - only worth showing once templates span more than one type */}
+                {templateTypes.length > 1 && templateTypes.map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setTemplateFilters(prev => ({
+                      ...prev,
+                      type: prev.type === type ? null : type
+                    }))}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium capitalize transition-all ${
+                      templateFilters.type === type
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {type}
+                  </button>
+                ))}
+
                 {/* Clear Filters */}
                 {(templateSearch || templateFilters.devices.length > 0 || templateFilters.hasText !== null || templateFilters.type !== null) && (
                   <button
@@ -1389,7 +1346,25 @@ function App() {
             </div>
 
             {/* Template Grid */}
-            {filteredTemplates.length > 0 ? (
+            {templatesLoading ? (
+              <div className="text-center py-12">
+                <Loader2 className="animate-spin mx-auto mb-3 text-blue-600" size={32} />
+                <p className="text-gray-600 text-sm">Loading templates...</p>
+              </div>
+            ) : templatesError ? (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <X size={24} className="text-red-500" />
+                </div>
+                <h3 className="font-semibold text-gray-900 mb-2">{templatesError}</h3>
+                <button
+                  onClick={loadTemplates}
+                  className="text-blue-600 font-medium text-sm hover:underline"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : filteredTemplates.length > 0 ? (
               <div className="template-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                 {filteredTemplates.map((template) => {
                   const metadata = getTemplateMetadata(template);
@@ -1835,6 +1810,11 @@ function App() {
 
               {/* Action Buttons */}
               <div className="space-y-2 sm:space-y-3">
+                {error && (
+                  <div role="alert" className="p-2.5 sm:p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs sm:text-sm">
+                    {error}
+                  </div>
+                )}
                 <button
                   onClick={handleDownload}
                   className="action-btn w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg font-semibold hover:shadow-lg transition-all flex items-center justify-center gap-2 text-sm sm:text-base"
@@ -1849,16 +1829,6 @@ function App() {
                 >
                   <ArrowLeft size={18} />
                   Back to Templates
-                </button>
-                
-                {/* Debug: Refresh Template Button */}
-                <button
-                  onClick={refreshTemplate}
-                  className="action-btn w-full bg-blue-100 text-blue-700 py-2.5 sm:py-3 px-4 sm:px-6 rounded-lg font-semibold hover:bg-blue-200 transition-all flex items-center justify-center gap-2 border border-blue-300 text-sm sm:text-base"
-                  title="Reload template from JSON file (for debugging)"
-                >
-                  <RefreshCw size={18} />
-                  Refresh Template
                 </button>
                 
                 <button
@@ -1877,28 +1847,6 @@ function App() {
                   <div className="preview-container bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-lg border border-gray-200 lg:sticky lg:top-24">
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4 gap-2">
                       <h3 className="font-bold text-base sm:text-lg">Preview</h3>
-                      
-                      {/* Debug Info */}
-                      {templateData && (
-                        <div className="debug-info text-[10px] sm:text-xs text-gray-500 flex flex-wrap items-center gap-1 sm:gap-2">
-                          <span className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-gray-100 rounded">
-                            {templateData.name}
-                          </span>
-                          <span className="px-1.5 sm:px-2 py-0.5 sm:py-1 bg-gray-100 rounded font-mono">
-                            {templateData.canvas.width} × {templateData.canvas.height}
-                          </span>
-                          {templateData.devices.desktop?.mockupImage && (
-                            <span className="hidden sm:inline px-2 py-1 bg-blue-50 text-blue-600 rounded font-mono text-[10px]">
-                              D: {templateData.devices.desktop.mockupImage}
-                            </span>
-                          )}
-                          {templateData.devices.mobile?.mockupImage && (
-                            <span className="hidden sm:inline px-2 py-1 bg-purple-50 text-purple-600 rounded font-mono text-[10px]">
-                              M: {templateData.devices.mobile.mockupImage}
-                            </span>
-                          )}
-                        </div>
-                      )}
                     </div>
                     
                     <div className="canvas-container overflow-auto max-h-[40vh] sm:max-h-[50vh] lg:max-h-[calc(100vh-200px)]">
